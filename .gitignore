@@ -1,0 +1,27 @@
+# Local parameter overrides (the committed .bicepparam files read tenant values
+# from environment variables and hold none themselves)
+parameters/*.local.bicepparam
+
+# Secrets — never commit
+*.pw
+*.secret
+.env
+
+# Bicep build output (bicep build / build-params write <name>.json beside the source).
+# Only there: a repo-wide *.json rule once kept the image pipeline's JSON data files out
+# of a PR (build/lessons/0027). Data files the templates load must be committed.
+bicep/**/*.json
+parameters/**/*.json
+
+# PSRule reports
+reports/
+
+# OS / editor
+.DS_Store
+.vscode/
+*.swp
+testResults.xml
+
+# Python bytecode (scripts/kb)
+__pycache__/
+node_modules/
