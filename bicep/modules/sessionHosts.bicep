@@ -37,6 +37,11 @@ param autoShutdownTimeZone string = 'UTC'
 @description('Create the resource-group role assignments for VM sign-in and power management. Set to false on additional pool modules targeting the same resource group.')
 param deployRoleAssignments bool = true
 
+@description('Resource ID of the parent AVD host pool. When set, applies cm-resource-parent on the VM, disk, NIC, schedule, extensions, and run commands so Azure Cost Management groups session-host spend under the host pool.')
+param hostPoolResourceId string = ''
+
+var hostTags = empty(hostPoolResourceId) ? tags : union(tags, { 'cm-resource-parent': hostPoolResourceId })
+
 var roles = {
   vmUserLogin: 'fb879df8-f326-4884-b1cf-06f3ad86be52'
   vmAdminLogin: '1c0163c0-47e6-4577-8991-ea5c82e286e4'
@@ -53,7 +58,7 @@ module vm 'br/public:avm/res/compute/virtual-machine:0.22.3' = [
     params: {
       name: vmName
       location: location
-      tags: tags
+      tags: hostTags
       vmSize: vmSize
       autoShutdownConfig: empty(autoShutdownTime) ? {} : { status: 'Enabled', dailyRecurrenceTime: autoShutdownTime, timeZone: autoShutdownTimeZone }
       osType: 'Windows'
@@ -132,7 +137,7 @@ resource configureFslogix 'Microsoft.Compute/virtualMachines/runCommands@2024-07
     parent: sessionHost[i]
     name: 'Configure-FSLogix'
     location: location
-    tags: tags
+    tags: hostTags
     properties: {
       source: {
         script: loadTextContent('../../scripts/sessionhost/Set-FSLogixConfiguration.ps1')
@@ -166,7 +171,7 @@ resource registerAgent 'Microsoft.Compute/virtualMachines/runCommands@2024-07-01
     parent: sessionHost[i]
     name: 'Register-AvdAgent'
     location: location
-    tags: tags
+    tags: hostTags
     properties: {
       source: {
         script: loadTextContent('../../scripts/sessionhost/Register-AvdAgent.ps1')
