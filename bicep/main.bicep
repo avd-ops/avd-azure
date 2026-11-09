@@ -727,6 +727,7 @@ module sessionHosts 'modules/sessionHosts.bicep' = {
     localAdminUsername: localAdminUsername
     localAdminPassword: localAdminPassword
     hostPoolRegistrationToken: controlPlane.outputs.registrationToken
+    hostPoolResourceId: controlPlane.outputs.hostPoolResourceId
     dataCollectionRuleResourceId: monitoring.outputs.avdInsightsDataCollectionRuleResourceId
     profileShareUncPath: storage.outputs.profileShareUncPath
     fslogixProfileSizeMiB: int(primaryPool.?fslogixProfileSizeMiB ?? fslogixProfileSizeMiB)
@@ -761,6 +762,7 @@ module additionalSessionHosts 'modules/sessionHosts.bicep' = [
       localAdminUsername: localAdminUsername
       localAdminPassword: localAdminPassword
       hostPoolRegistrationToken: additionalControlPlanePools[i].outputs.registrationToken
+      hostPoolResourceId: additionalControlPlanePools[i].outputs.hostPoolResourceId
       dataCollectionRuleResourceId: monitoring.outputs.avdInsightsDataCollectionRuleResourceId
       profileShareUncPath: storage.outputs.profileShareUncPath
       fslogixProfileSizeMiB: int(pool.?fslogixProfileSizeMiB ?? fslogixProfileSizeMiB)
