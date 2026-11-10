@@ -124,6 +124,9 @@ module account 'br/public:avm/res/storage/storage-account:0.33.1' = {
   }
 }
 
+var storageEndpointSuffix = cloud == 'usgov' ? 'core.usgovcloudapi.net' : az.environment().suffixes.storage
+
 output name string = account.outputs.name
 output resourceId string = account.outputs.resourceId
-output profileShareUncPath string = '\\\\${account.outputs.name}.file.${environment().suffixes.storage}\\${shareName}'
+output storageEndpointSuffix string = storageEndpointSuffix
+output profileShareUncPath string = '\\\\${account.outputs.name}.file.${storageEndpointSuffix}\\${shareName}'

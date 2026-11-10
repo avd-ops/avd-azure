@@ -11,10 +11,16 @@
 param(
   [Parameter(Mandatory)] [string] $ProfileShareUncPath,
   [int] $ProfileSizeMiB = 30720,
-  [string] $LocalAdminUsername = ''
+  [string] $LocalAdminUsername = '',
+  [ValidateSet('commercial', 'usgov')] [string] $Cloud = 'commercial',
+  [ValidateSet('standard', 'itar-cui')] [string] $ComplianceProfile = 'standard'
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Cloud -eq 'usgov' -and -not $PSBoundParameters.ContainsKey('ComplianceProfile')) {
+  $ComplianceProfile = 'itar-cui'
+}
 
 function Write-RegValue([string] $Path, [string] $Name, $Value, [string] $Type = 'DWord') {
   if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
@@ -29,6 +35,41 @@ if (-not (Get-Service -Name frxsvc -ErrorAction SilentlyContinue)) {
 # --- Entra Kerberos: let the host fetch cloud Kerberos tickets for Azure Files ---
 Write-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters' 'CloudKerberosTicketRetrievalEnabled' 1
 Write-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\AzureADAccount' 'LoadCredKeyFromProfile' 1
+
+# --- Sovereign / ITAR-CUI compliance profile hardening (FedRAMP High / DoD IL4-5 / CMMC / ITAR) ---
+if ($ComplianceProfile -eq 'itar-cui') {
+  $tsPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+  # Screen capture protection (1 = block both client and server capture) and watermarking
+  Write-RegValue $tsPolicy 'fEnableScreenCaptureProtect' 1
+  Write-RegValue $tsPolicy 'fEnableWatermarking' 1
+  # Host-level device and clipboard redirection lockdown
+  Write-RegValue $tsPolicy 'fDisableClip' 1
+  Write-RegValue $tsPolicy 'fDisableCpm' 1
+  Write-RegValue $tsPolicy 'fDisableCdm' 1
+  Write-RegValue $tsPolicy 'fDisableCcm' 1
+  Write-RegValue $tsPolicy 'fDisableLPT' 1
+  Write-RegValue $tsPolicy 'fDisablePNPRedir' 1
+  Write-RegValue $tsPolicy 'fEnableUsbBlockDeviceBySetupClass' 1
+
+  # FIPS 140 cryptographic mode
+  Write-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FIPSAlgorithmPolicy' 'Enabled' 1
+
+  # TLS 1.2+ baseline enforcement (disable legacy TLS 1.0 and 1.1; enable TLS 1.2 and strong crypto)
+  foreach ($legacyVer in @('TLS 1.0', 'TLS 1.1')) {
+    foreach ($role in @('Client', 'Server')) {
+      $protoKey = "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\$legacyVer\$role"
+      Write-RegValue $protoKey 'Enabled' 0
+      Write-RegValue $protoKey 'DisabledByDefault' 1
+    }
+  }
+  foreach ($role in @('Client', 'Server')) {
+    $tls12Key = "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\$role"
+    Write-RegValue $tls12Key 'Enabled' 1
+    Write-RegValue $tls12Key 'DisabledByDefault' 0
+  }
+  Write-RegValue 'HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319' 'SchUseStrongCrypto' 1
+  Write-RegValue 'HKLM:\SOFTWARE\Wow6432Node\Microsoft\.NETFramework\v4.0.30319' 'SchUseStrongCrypto' 1
+}
 
 # --- FSLogix profile container ---
 $fsl = 'HKLM:\SOFTWARE\FSLogix\Profiles'
@@ -76,4 +117,4 @@ try {
   Write-Warning "Defender exclusions not applied (likely policy-managed): $($_.Exception.Message)"
 }
 
-Write-Output "FSLogix configured for $ProfileShareUncPath"
+Write-Output "FSLogix configured for $ProfileShareUncPath (cloud=$Cloud, complianceProfile=$ComplianceProfile)"

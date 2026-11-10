@@ -5,9 +5,14 @@ using '../bicep/main.bicep'
 
 param namePrefix = 'avdlz'
 param environmentName = 'prod'
+// Sovereign cloud target and compliance profile (contracts/cloud-environments.json, C26).
+param cloud = empty(readEnvironmentVariable('AVD_CLOUD', '')) ? 'commercial' : readEnvironmentVariable('AVD_CLOUD', '')
+param complianceProfile = empty(readEnvironmentVariable('AVD_COMPLIANCE_PROFILE', ''))
+  ? (toLower(readEnvironmentVariable('AVD_CLOUD', '')) == 'usgov' ? 'itar-cui' : 'standard')
+  : readEnvironmentVariable('AVD_COMPLIANCE_PROFILE', '')
 // Default region; deploy.sh -l and the preflight's -Location override it (AVD_LOCATION).
 param location = empty(readEnvironmentVariable('AVD_LOCATION', ''))
-  ? 'northcentralus'
+  ? (toLower(readEnvironmentVariable('AVD_CLOUD', '')) == 'usgov' ? 'usgovvirginia' : 'northcentralus')
   : readEnvironmentVariable('AVD_LOCATION', '')
 // Recovery region the guardrails also allow (build/specs/recovery-spec.md); empty: none.
 param recoveryLocation = readEnvironmentVariable('AVD_RECOVERY_LOCATION', '')

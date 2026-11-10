@@ -27,13 +27,27 @@ param namePrefix string
 ])
 param environmentName string
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
+
+@description('Session and host hardening profile (itar-cui by default when cloud == usgov; standard otherwise).')
+@allowed([
+  'standard'
+  'itar-cui'
+])
+param complianceProfile string = (cloud == 'usgov' ? 'itar-cui' : 'standard')
+
 param location string = deployment().location
 
 // ---------- Landing zone inputs (discovered by Deploy-AvdDemo.ps1) ----------
 param sessionHostSubnetResourceId string
 param privateEndpointSubnetResourceId string
 
-@description('Private DNS zone for privatelink.wvd.microsoft.com. Empty when AVD Private Link is off.')
+@description('Private DNS zone resource ID for AVD Private Link (connection/feed). Empty when AVD Private Link is off.')
 param avdPrivateDnsZoneResourceId string = ''
 param logAnalyticsWorkspaceResourceId string
 param dataCollectionRuleResourceId string
@@ -64,7 +78,10 @@ param localAdminUsername string = 'avdbreakglass'
 @minLength(14)
 param localAdminPassword string
 
-param rdpProperties string = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
+var standardRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
+var itarCuiRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
+
+param rdpProperties string = complianceProfile == 'itar-cui' ? itarCuiRdpProperties : standardRdpProperties
 
 var cleanPrefix = toLower(replace(namePrefix, '-', ''))
 var baseName = '${cleanPrefix}-${environmentName}-demo'
@@ -86,6 +103,8 @@ module controlPlane '../modules/controlPlane.bicep' = {
   name: 'avdlz-demo-control-plane'
   scope: rgDemo
   params: {
+    cloud: cloud
+    complianceProfile: complianceProfile
     location: location
     tags: tags
     hostPoolName: 'vdpool-${baseName}'
@@ -112,6 +131,8 @@ module sessionHosts '../modules/sessionHosts.bicep' = {
   name: 'avdlz-demo-session-hosts'
   scope: rgDemo
   params: {
+    cloud: cloud
+    complianceProfile: complianceProfile
     location: location
     tags: tags
     count: sessionHostCount
@@ -137,6 +158,8 @@ module sessionHosts '../modules/sessionHosts.bicep' = {
   }
 }
 
+output cloud string = cloud
+output complianceProfile string = complianceProfile
 output resourceGroupName string = rgDemo.name
 output hostPoolResourceId string = controlPlane.outputs.hostPoolResourceId
 output hostPoolName string = controlPlane.outputs.hostPoolName

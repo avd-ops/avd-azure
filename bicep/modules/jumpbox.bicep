@@ -16,6 +16,12 @@
 // data and admin password of a VM that exists. Its daily stop and tags are separate resources here,
 // so a redeploy still updates them.
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
 param location string
 param tags object
 param vmName string
@@ -67,7 +73,8 @@ var images = {
     version: 'latest'
   }
 }
-var vmTags = union(tags, { purpose: 'jumpbox' }, keepRunning ? { 'avdlz-keep-running-until': keepRunningUntil } : {})
+var bastionSku = cloud == 'usgov' ? 'Basic' : 'Developer'
+var vmTags = union(tags, { purpose: 'jumpbox', cloud: cloud, bastionSku: bastionSku }, keepRunning ? { 'avdlz-keep-running-until': keepRunningUntil } : {})
 
 module vm 'br/public:avm/res/compute/virtual-machine:0.22.3' = if (!vmExists) {
   name: 'vm-${vmName}'

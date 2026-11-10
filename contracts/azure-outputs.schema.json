@@ -17,6 +17,22 @@
     "schema": {
       "const": "avd-ops-azure-outputs/v1"
     },
+    "cloud": {
+      "type": "string",
+      "enum": [
+        "commercial",
+        "usgov"
+      ],
+      "default": "commercial"
+    },
+    "complianceProfile": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "itar-cui"
+      ],
+      "default": "standard"
+    },
     "environment": {
       "type": "string",
       "enum": [

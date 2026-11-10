@@ -5,6 +5,7 @@
 # Usage:
 #   ./scripts/deploy/deploy.sh -p parameters/dev.bicepparam -l northcentralus \
 #       --users-group "AVD Users" --admins-group "AVD Admins" [-s <subscription>] [--what-if] \
+#       [--cloud commercial|usgov] [--compliance-profile standard|itar-cui] \
 #       [--hosts 3 --vm-size Standard_D8as_v5 --max-sessions 16 --profile-quota 600] \
 #       [--auto-shutdown 20:00|none --start-vm-on-connect true|false] [--unlock] \
 #       [--topology <json-or-file>] \
@@ -29,6 +30,7 @@
 # it is created). --jumpbox-keep-running skips its daily stop until that UTC time.
 #
 # Environment variables (any flag above overrides):
+#   AVD_CLOUD, AVD_COMPLIANCE_PROFILE         cloud (commercial|usgov) and profile (standard|itar-cui)
 #   AVD_USERS_GROUP_ID, AVD_ADMINS_GROUP_ID   Entra group object IDs
 #   AVD_LOCAL_ADMIN_PASSWORD                  break-glass password (random if unset)
 #   AVD_SERVICE_PRINCIPAL_ID                  looked up if unset (CI sets it to avoid Graph reads)
@@ -67,10 +69,12 @@ JUMPBOX=false
 JUMPBOX_KEEP_RUNNING=""
 JUMPBOX_OS="${AVD_JUMPBOX_OS:-}"
 TOPOLOGY="${AVD_TOPOLOGY_JSON:-}"
+CLOUD="${AVD_CLOUD:-commercial}"
+COMPLIANCE_PROFILE="${AVD_COMPLIANCE_PROFILE:-}"
 AVD_APP_ID="9cdead84-a844-4324-93f2-b2e6bb768d07"   # Azure Virtual Desktop first-party app
 
 usage() {
-  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -82,6 +86,8 @@ while [[ $# -gt 0 ]]; do
     --users-group) USERS_GROUP="$2"; shift 2 ;;
     --admins-group) ADMINS_GROUP="$2"; shift 2 ;;
     --what-if) WHATIF=true; shift ;;
+    --cloud) CLOUD="$2"; shift 2 ;;
+    --compliance-profile) COMPLIANCE_PROFILE="$2"; shift 2 ;;
     --hosts) HOSTS="$2"; shift 2 ;;
     --vm-size) VM_SIZE="$2"; shift 2 ;;
     --max-sessions) MAX_SESSIONS="$2"; shift 2 ;;
@@ -103,6 +109,18 @@ done
 
 [[ -z "$PARAM_FILE" || -z "$LOCATION" ]] && usage
 [[ ! -f "$PARAM_FILE" ]] && { echo "Parameter file not found: $PARAM_FILE"; exit 1; }
+CLOUD="${CLOUD,,}"
+[[ "$CLOUD" == commercial || "$CLOUD" == usgov ]] || { echo "--cloud takes commercial or usgov: '$CLOUD'"; exit 1; }
+if [[ -z "$COMPLIANCE_PROFILE" ]]; then
+  if [[ "$CLOUD" == usgov ]]; then COMPLIANCE_PROFILE="itar-cui"; else COMPLIANCE_PROFILE="standard"; fi
+fi
+COMPLIANCE_PROFILE="${COMPLIANCE_PROFILE,,}"
+[[ "$COMPLIANCE_PROFILE" == standard || "$COMPLIANCE_PROFILE" == itar-cui ]] || { echo "--compliance-profile takes standard or itar-cui: '$COMPLIANCE_PROFILE'"; exit 1; }
+USGOV_REGIONS=" usgovvirginia usgovarizona usgovtexas "
+if [[ "$CLOUD" == usgov && "$USGOV_REGIONS" != *" ${LOCATION,,} "* ]]; then
+  echo "Azure US Government deployments require a US Gov region (usgovvirginia, usgovarizona, usgovtexas); got '$LOCATION'." >&2
+  exit 1
+fi
 for n in "$HOSTS" "$MAX_SESSIONS" "$PROFILE_QUOTA"; do
   [[ -z "$n" || "$n" =~ ^[0-9]+$ ]] || { echo "Sizing flags take whole numbers: '$n'"; exit 1; }
 done
@@ -135,10 +153,11 @@ if [[ -n "$JUMPBOX_KEEP_RUNNING" ]]; then
     || { echo "Not a time: '$JUMPBOX_KEEP_RUNNING'"; exit 1; }
   (( until_s > $(date -u +%s) )) || { echo "--jumpbox-keep-running is in the past: '$JUMPBOX_KEEP_RUNNING'"; exit 1; }
 fi
-# Regions with Azure Bastion Developer (Microsoft Learn, bastion-sku-comparison; the same list as
-# Get-AvdBastionDeveloperRegion in scripts/ops/AvdLandingZone.psm1, a test checks they match).
+# Regions with Azure Bastion Developer in commercial cloud (Microsoft Learn, bastion-sku-comparison;
+# in Azure US Government, Bastion Developer is not available and bicep/modules/bastionDeveloper.bicep
+# automatically deploys Bastion Basic with AzureBastionSubnet).
 BASTION_DEVELOPER_REGIONS=" brazilsouth canadacentral canadaeast centralus centraluseuap eastus2 eastus2euap mexicocentral northcentralus westcentralus westus francecentral germanywestcentral italynorth northeurope norwayeast spaincentral swedencentral switzerlandnorth uksouth ukwest westeurope australiacentral australiaeast australiasoutheast centralindia eastasia japaneast japanwest koreacentral koreasouth southindia southeastasia southafricanorth uaenorth "
-if $JUMPBOX && [[ "$BASTION_DEVELOPER_REGIONS" != *" ${LOCATION,,} "* ]]; then
+if $JUMPBOX && [[ "$CLOUD" == commercial ]] && [[ "$BASTION_DEVELOPER_REGIONS" != *" ${LOCATION,,} "* ]]; then
   echo "Azure Bastion Developer isn't offered in $LOCATION, so --jumpbox can't be used there. Regions:$BASTION_DEVELOPER_REGIONS"
   exit 1
 fi
@@ -171,8 +190,16 @@ else
 fi
 export AVD_RUNBOOK_URI
 
-echo "==> Checking az and Bicep"
+echo "==> Checking az and Bicep (cloud=$CLOUD, complianceProfile=$COMPLIANCE_PROFILE)"
 az bicep version >/dev/null 2>&1 || az bicep install
+EXPECTED_AZ_CLOUD="AzureCloud"
+[[ "$CLOUD" == "usgov" ]] && EXPECTED_AZ_CLOUD="AzureUSGovernment"
+ACTIVE_AZ_CLOUD=$(az cloud show --query name -o tsv 2>/dev/null || echo "")
+if [[ "$ACTIVE_AZ_CLOUD" != "$EXPECTED_AZ_CLOUD" ]]; then
+  echo "ERROR: Cloud boundary mismatch: --cloud is '$CLOUD' (requires '$EXPECTED_AZ_CLOUD'), but active az cloud is '${ACTIVE_AZ_CLOUD:-unknown}'." >&2
+  echo "       Run 'az cloud set --name $EXPECTED_AZ_CLOUD' and sign in before deploying." >&2
+  exit 1
+fi
 az account show >/dev/null 2>&1 || { echo "Run 'az login' first."; exit 1; }
 # Azure Resource Manager calls go through arm, which adds -s to each one, so deploying to another
 # subscription never changes the one az has selected. Graph calls (az ad, az rest) read the tenant,
@@ -223,12 +250,14 @@ arm provider register -n Microsoft.Compute >/dev/null
 # A group given by name must not be one an ordinary user created with that name: it would get VM
 # Admin Login, the break-glass secret and elevated share access. Its owners must be administrators
 # (or you). A group given by object ID was picked deliberately and is used as it is.
+GRAPH_ENDPOINT="https://graph.microsoft.com"
+[[ "$CLOUD" == "usgov" ]] && GRAPH_ENDPOINT="https://graph.microsoft.us"
 admin_role_member_ids() {
   # Active members of Global, Privileged Role, Groups and User Administrator (role template IDs).
   local t r
   for t in 62e90394-69f5-4237-9190-012177145e10 e8611ab8-c189-46e8-94e1-60213ab1f814 fdd7a751-b60b-444a-984c-02652fe8fa1c fe930be7-5e62-47db-91af-98c3a49a38b1; do
-    for r in $(az rest --method get --url "https://graph.microsoft.com/v1.0/directoryRoles?\$filter=roleTemplateId eq '$t'" --query "value[].id" -o tsv 2>/dev/null); do
-      az rest --method get --url "https://graph.microsoft.com/v1.0/directoryRoles/$r/members?\$select=id" --query "value[].id" -o tsv 2>/dev/null
+    for r in $(az rest --method get --url "$GRAPH_ENDPOINT/v1.0/directoryRoles?\$filter=roleTemplateId eq '$t'" --query "value[].id" -o tsv 2>/dev/null); do
+      az rest --method get --url "$GRAPH_ENDPOINT/v1.0/directoryRoles/$r/members?\$select=id" --query "value[].id" -o tsv 2>/dev/null
     done
   done
 }
@@ -275,7 +304,9 @@ if [[ -z "${AVD_LOCAL_ADMIN_PASSWORD:-}" ]]; then
 fi
 
 AVD_LOCATION="$LOCATION"
-export AVD_USERS_GROUP_ID AVD_ADMINS_GROUP_ID AVD_SERVICE_PRINCIPAL_ID AVD_LOCAL_ADMIN_PASSWORD AVD_LOCATION
+AVD_CLOUD="$CLOUD"
+AVD_COMPLIANCE_PROFILE="$COMPLIANCE_PROFILE"
+export AVD_USERS_GROUP_ID AVD_ADMINS_GROUP_ID AVD_SERVICE_PRINCIPAL_ID AVD_LOCAL_ADMIN_PASSWORD AVD_LOCATION AVD_CLOUD AVD_COMPLIANCE_PROFILE
 # Sizing overrides (empty = the parameter file's values).
 AVD_SESSION_HOST_COUNT="$HOSTS" AVD_SESSION_HOST_VM_SIZE="$VM_SIZE" AVD_MAX_SESSION_LIMIT="$MAX_SESSIONS" AVD_PROFILE_QUOTA_GIB="$PROFILE_QUOTA"
 export AVD_SESSION_HOST_COUNT AVD_SESSION_HOST_VM_SIZE AVD_MAX_SESSION_LIMIT AVD_PROFILE_QUOTA_GIB
@@ -322,8 +353,8 @@ portal_state() {
   fi
   local commit=""
   [[ -n "$PORTAL_COMMIT" ]] && commit=",\"commit\":$(json_str "$PORTAL_COMMIT")"
-  printf '<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"%s","context":{"parameterFile":%s,"location":%s,"usersGroup":%s,"adminsGroup":%s,"deploymentName":%s%s%s%s}} AVDLZ-STATE>>>\n' \
-    "$1" "$(json_str "$PARAM_FILE")" "$(json_str "$LOCATION")" "$(json_str "$USERS_GROUP")" "$(json_str "$ADMINS_GROUP")" "$(json_str "$DEPLOY_NAME")" "$sizing" "$commit" "${2:-}"
+  printf '<<<AVDLZ-STATE {"v":1,"stage":"deploy","status":"%s","context":{"parameterFile":%s,"location":%s,"cloud":%s,"complianceProfile":%s,"usersGroup":%s,"adminsGroup":%s,"deploymentName":%s%s%s%s}} AVDLZ-STATE>>>\n' \
+    "$1" "$(json_str "$PARAM_FILE")" "$(json_str "$LOCATION")" "$(json_str "$CLOUD")" "$(json_str "$COMPLIANCE_PROFILE")" "$(json_str "$USERS_GROUP")" "$(json_str "$ADMINS_GROUP")" "$(json_str "$DEPLOY_NAME")" "$sizing" "$commit" "${2:-}"
 }
 
 # --- Session hosts that aren't running (lesson 0026) ---

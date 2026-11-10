@@ -12,6 +12,8 @@
 #>
 param(
   [Parameter(Mandatory)] [string] $RegistrationToken,
+  [ValidateSet('commercial', 'usgov')] [string] $Cloud = 'commercial',
+  [ValidateSet('standard', 'itar-cui')] [string] $ComplianceProfile = 'standard',
   [string] $AgentUri = 'https://go.microsoft.com/fwlink/?linkid=2310011',
   [string] $BootLoaderUri = 'https://go.microsoft.com/fwlink/?linkid=2311028'
 )
@@ -19,17 +21,26 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+if ($Cloud -eq 'usgov' -and -not $PSBoundParameters.ContainsKey('ComplianceProfile')) {
+  $ComplianceProfile = 'itar-cui'
+}
+
+# Enforce TLS 1.2+ before downloading agent installers (required for US Gov / FIPS 140 / TLS 1.2 baseline)
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 $agentKey = 'HKLM:\SOFTWARE\Microsoft\RDInfraAgent'
 $state = Get-ItemProperty -Path $agentKey -ErrorAction SilentlyContinue
 if ($state -and $state.IsRegistered -eq 1) {
-  Write-Output 'Session host is already registered to a host pool; nothing to do.'
+  Write-Output "Session host is already registered to a host pool (cloud=$Cloud, complianceProfile=$ComplianceProfile); nothing to do."
   return
 }
 
 if (Get-Service -Name RDAgentBootLoader -ErrorAction SilentlyContinue) {
-  Write-Output 'Agent present but not registered; applying the new registration token.'
+  Write-Output "Agent present but not registered; applying the new registration token (cloud=$Cloud, complianceProfile=$ComplianceProfile)."
   Set-ItemProperty -Path $agentKey -Name RegistrationToken -Value $RegistrationToken
   Set-ItemProperty -Path $agentKey -Name IsRegistered -Value 0
+  Set-ItemProperty -Path $agentKey -Name AvdCloudEnvironment -Value $Cloud -ErrorAction SilentlyContinue
+  Set-ItemProperty -Path $agentKey -Name AvdComplianceProfile -Value $ComplianceProfile -ErrorAction SilentlyContinue
   Restart-Service -Name RDAgentBootLoader
   return
 }
@@ -51,5 +62,10 @@ function Install-Msi([string] $Uri, [string] $FileName, [string] $ExtraArgs = ''
 Install-Msi $AgentUri 'RDAgent.msi' "REGISTRATIONTOKEN=$RegistrationToken"
 Install-Msi $BootLoaderUri 'RDAgentBootLoader.msi'
 
+if (Test-Path $agentKey) {
+  New-ItemProperty -Path $agentKey -Name AvdCloudEnvironment -Value $Cloud -PropertyType String -Force | Out-Null
+  New-ItemProperty -Path $agentKey -Name AvdComplianceProfile -Value $ComplianceProfile -PropertyType String -Force | Out-Null
+}
+
 Remove-Item -Path (Join-Path $work '*.msi') -Force -ErrorAction SilentlyContinue
-Write-Output 'AVD Agent and Boot Loader installed; host will appear in the pool within a few minutes.'
+Write-Output "AVD Agent and Boot Loader installed (cloud=$Cloud, complianceProfile=$ComplianceProfile); host will appear in the pool within a few minutes."

@@ -33,7 +33,9 @@ param(
   # Why it ran (schedule, budget, manual): recorded on the host pool when locking.
   [string] $Reason = 'manual',
   # Stop: also deallocate hosts that have user sessions.
-  [bool] $Force = $false
+  [bool] $Force = $false,
+  # Sovereign cloud boundary (commercial or usgov).
+  [ValidateSet('commercial', 'usgov')][string] $Cloud = 'commercial'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,13 +45,27 @@ $exclusionTag = 'avd-scaling-exclude'  # the scaling plan's exclusion tag (bicep
 $lockValue = 'avdlz-lock'
 
 # ---------------------------------------------------------------- ARM
+function Get-ArmEndpoint {
+  param([string] $CloudName)
+  $contractPath = Join-Path $PSScriptRoot '..\..\contracts\cloud-environments.json'
+  if (Test-Path $contractPath) {
+    $contract = Get-Content -Path $contractPath -Raw | ConvertFrom-Json
+    return ($contract.clouds.$CloudName.armEndpoint).TrimEnd('/')
+  }
+  $armDomain = if ($CloudName -eq 'usgov') { 'usgovcloudapi.net' } else { 'azure.com' }
+  return "https://management.$armDomain"
+}
+
+$script:ArmBaseUri = Get-ArmEndpoint -CloudName $Cloud
+
 function Get-ArmToken {
+  $resourceUri = "$script:ArmBaseUri/"
   if ($env:IDENTITY_ENDPOINT -and $env:IDENTITY_HEADER) {
     # Automation managed identity (no Az modules needed).
     $h = @{ 'X-IDENTITY-HEADER' = $env:IDENTITY_HEADER; Metadata = 'True' }
-    return (Invoke-RestMethod -Uri ($env:IDENTITY_ENDPOINT + '?resource=https://management.azure.com/') -Method Get -Headers $h).access_token
+    return (Invoke-RestMethod -Uri ($env:IDENTITY_ENDPOINT + "?resource=$resourceUri") -Method Get -Headers $h).access_token
   }
-  $t = Get-AzAccessToken -ResourceUrl 'https://management.azure.com/' -ErrorAction Stop
+  $t = Get-AzAccessToken -ResourceUrl $resourceUri -ErrorAction Stop
   if ($t.Token -is [System.Security.SecureString]) { return [System.Net.NetworkCredential]::new('', $t.Token).Password }
   return $t.Token
 }
@@ -70,7 +86,7 @@ function Get-ErrorText {
 
 function Invoke-Arm {
   param([string] $Method = 'GET', [Parameter(Mandatory)][string] $Path, $Body)
-  $p = @{ Uri = "https://management.azure.com$Path"; Method = $Method; Headers = @{ Authorization = "Bearer $script:Token" }; ContentType = 'application/json' }
+  $p = @{ Uri = "$script:ArmBaseUri$Path"; Method = $Method; Headers = @{ Authorization = "Bearer $script:Token" }; ContentType = 'application/json' }
   if ($null -ne $Body) { $p.Body = ($Body | ConvertTo-Json -Depth 10 -Compress) }
   try { Invoke-RestMethod @p }
   catch { throw "ARM $Method $Path failed: $(Get-ErrorText $_)" }

@@ -1,6 +1,12 @@
 // Key Vault — holds the session hosts' break-glass local admin credential.
 // RBAC-authorized, purge-protected, reachable only over its private endpoint.
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
 param location string
 param tags object
 param name string
@@ -14,6 +20,7 @@ param localAdminUsername string
 param localAdminPassword string
 
 var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+var keyVaultDnsSuffix = cloud == 'usgov' ? '.vault.usgovcloudapi.net' : az.environment().suffixes.keyvaultDns
 
 module vault 'br/public:avm/res/key-vault/vault:0.14.2' = {
   name: 'key-vault'
@@ -73,3 +80,4 @@ module vault 'br/public:avm/res/key-vault/vault:0.14.2' = {
 
 output name string = vault.outputs.name
 output resourceId string = vault.outputs.resourceId
+output vaultUri string = 'https://${vault.outputs.name}${keyVaultDnsSuffix}/'
