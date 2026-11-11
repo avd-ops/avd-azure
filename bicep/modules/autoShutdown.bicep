@@ -4,6 +4,12 @@
 // starts a runbook job with its own managed identity (Automation Operator on the account); the
 // runbook acts with the Automation account's (roles in autoShutdownRbac.bicep).
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
 param location string
 param tags object
 param baseName string
@@ -132,6 +138,7 @@ var jobParameters = {
   NamePrefix: namePrefix
   Environment: environmentName
   SubscriptionId: subscription().subscriptionId
+  Cloud: cloud
 }
 
 resource scheduleWorkflow 'Microsoft.Logic/workflows@2019-05-01' = if (hasSchedule) {

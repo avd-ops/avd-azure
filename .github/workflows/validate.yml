@@ -20,7 +20,7 @@ jobs:
           az bicep lint --file bicep/demo/main.bicep
           az bicep lint --file bicep/images/main.bicep
           az bicep lint --file bicep/images/build.bicep
-      - name: Build parameter files
+      - name: Build parameter files (commercial)
         env:
           AVD_USERS_GROUP_ID: "00000000-0000-0000-0000-000000000001"
           AVD_ADMINS_GROUP_ID: "00000000-0000-0000-0000-000000000002"
@@ -30,5 +30,29 @@ jobs:
           for p in parameters/dev.bicepparam parameters/test.bicepparam parameters/prod.bicepparam; do
             az bicep build-params --file "$p" --stdout > /dev/null
           done
+      - name: Build parameter files (Azure US Government) and verify zero commercial DNS leakage
+        env:
+          AVD_CLOUD: "usgov"
+          AVD_COMPLIANCE_PROFILE: "itar-cui"
+          AVD_LOCATION: "usgovvirginia"
+          AVD_USERS_GROUP_ID: "00000000-0000-0000-0000-000000000001"
+          AVD_ADMINS_GROUP_ID: "00000000-0000-0000-0000-000000000002"
+          AVD_SERVICE_PRINCIPAL_ID: "00000000-0000-0000-0000-000000000003"
+          AVD_LOCAL_ADMIN_PASSWORD: "Placeholder-only-for-build-1!"
+        run: |
+          for p in parameters/dev.bicepparam parameters/test.bicepparam parameters/prod.bicepparam; do
+            out=$(az bicep build-params --file "$p" --stdout | jq -r .parametersJson)
+            echo "$out" | grep -q '"usgov"'
+            echo "$out" | grep -q '"itar-cui"'
+            echo "$out" | grep -q '"usgovvirginia"'
+          done
+          compiled=$(az bicep build --file bicep/modules/privateDns.bicep --stdout)
+          echo "$compiled" | grep -q "privatelink.wvd.azure.us"
+          echo "$compiled" | grep -q "privatelink-global.wvd.azure.us"
       - name: ShellCheck deploy script
         run: shellcheck scripts/deploy/deploy.sh
+      - name: PSScriptAnalyzer and Pester tests
+        run: |
+          pwsh -c "Invoke-ScriptAnalyzer -Path ./scripts -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit"
+          pwsh -c "Invoke-ScriptAnalyzer -Path ./tests -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -EnableExit"
+          pwsh -c "Invoke-Pester -Path ./tests -CI"

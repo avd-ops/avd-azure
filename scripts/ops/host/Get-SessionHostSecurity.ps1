@@ -45,7 +45,7 @@ $r.lsaRunAsPpl = Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' 'RunA
 try { $r.smb1Enabled = [bool](Get-SmbServerConfiguration -ErrorAction Stop).EnableSMB1Protocol }
 catch { $readErrors.Add("Get-SmbServerConfiguration: $($_.Exception.Message)") }
 
-# Session limits and screen lock: not set means not limited (0).
+# Session limits, screen capture protection, watermarking, FIPS 140, TLS 1.2+, and ITAR/CUI redirection lockdown
 $ts = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
 $idle = Get-RegValue $ts 'MaxIdleTime'
 $r.maxIdleTimeMs = if ($null -ne $idle) { [int64]$idle } else { 0 }
@@ -53,6 +53,27 @@ $lock = Get-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\S
 $r.inactivityTimeoutSecs = if ($null -ne $lock) { [int64]$lock } else { 0 }
 $scp = Get-RegValue $ts 'fEnableScreenCaptureProtect'
 $r.screenCaptureProtection = if ($null -ne $scp) { [int]$scp } else { 0 }
+$wm = Get-RegValue $ts 'fEnableWatermarking'
+$r.watermarking = if ($null -ne $wm) { [int]$wm } else { 0 }
+$fips = Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FIPSAlgorithmPolicy' 'Enabled'
+$r.fipsModeEnabled = if ($null -ne $fips) { [int]$fips } else { 0 }
+$tls10Srv = Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.0\Server' 'Enabled'
+$tls11Srv = Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.1\Server' 'Enabled'
+$tls12Srv = Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols\TLS 1.2\Server' 'Enabled'
+$strongCrypto = Get-RegValue 'HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319' 'SchUseStrongCrypto'
+$r.tls12Enabled = [bool](
+  ($null -eq $tls10Srv -or [int]$tls10Srv -eq 0) -and
+  ($null -eq $tls11Srv -or [int]$tls11Srv -eq 0) -and
+  ($null -eq $tls12Srv -or [int]$tls12Srv -ne 0) -and
+  ($null -eq $strongCrypto -or [int]$strongCrypto -eq 1)
+)
+$r.redirectionLockdown = [bool](
+  ((Get-RegValue $ts 'fDisableClip') -eq 1) -and
+  ((Get-RegValue $ts 'fDisableCpm') -eq 1) -and
+  ((Get-RegValue $ts 'fDisableCdm') -eq 1) -and
+  ((Get-RegValue $ts 'fDisableCcm') -eq 1) -and
+  ((Get-RegValue $ts 'fDisablePNPRedir') -eq 1)
+)
 
 # Local Administrators (by its well-known SID, so a localized name works) beyond the built-in
 # account (-500) and Entra SIDs (S-1-12-1-*). ADSI, because Get-LocalGroupMember fails on

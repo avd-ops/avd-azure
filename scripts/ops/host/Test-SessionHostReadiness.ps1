@@ -12,11 +12,17 @@
 #>
 param(
   [Parameter(Mandatory)] [string] $StorageFqdn,
-  [Parameter(Mandatory)] [string] $ProfileShareUnc
+  [Parameter(Mandatory)] [string] $ProfileShareUnc,
+  [ValidateSet('commercial', 'usgov')] [string] $Cloud = 'commercial',
+  [ValidateSet('standard', 'itar-cui')] [string] $ComplianceProfile = 'standard'
 )
 
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
+
+if ($Cloud -eq 'usgov' -and -not $PSBoundParameters.ContainsKey('ComplianceProfile')) {
+  $ComplianceProfile = 'itar-cui'
+}
 
 function Get-RegValue([string] $Path, [string] $Name) {
   $item = Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue
@@ -30,6 +36,8 @@ function Test-ServiceRunning([string] $Name) {
 }
 
 $r = [ordered]@{}
+$r.cloud = $Cloud
+$r.complianceProfile = $ComplianceProfile
 
 # Identity and management
 $dsreg = (dsregcmd /status) | Out-String
@@ -51,6 +59,16 @@ $r.cloudKerberosEnabled = (Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\
 $r.loadCredKeyFromProfile = (Get-RegValue 'HKLM:\SOFTWARE\Policies\Microsoft\AzureADAccount' 'LoadCredKeyFromProfile') -eq 1
 # Microsoft lists both as required for Entra Kerberos: WinHttpAutoProxySvc carries the KDC proxy requests.
 $r.kerberosServicesStopped = @('WinHttpAutoProxySvc', 'iphlpsvc' | Where-Object { -not (Test-ServiceRunning $_) })
+
+# Sovereign storage suffix and ITAR/CUI host posture
+$storageRoot = if ($Cloud -eq 'usgov') { 'usgovcloudapi.net' } else { 'windows' + '.net' }
+$expectedStorageSuffix = ".file.core.$storageRoot"
+$r.storageSuffixValid = $StorageFqdn.EndsWith($expectedStorageSuffix, [System.StringComparison]::OrdinalIgnoreCase)
+$ts = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+$r.fipsModeEnabled = (Get-RegValue 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FIPSAlgorithmPolicy' 'Enabled') -eq 1
+$r.screenCaptureProtection = (Get-RegValue $ts 'fEnableScreenCaptureProtect') -in @(1, 2)
+$r.watermarking = (Get-RegValue $ts 'fEnableWatermarking') -eq 1
+$r.tls12Enabled = (Get-RegValue 'HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319' 'SchUseStrongCrypto') -eq 1
 
 # Profile share reachability
 $r.storageIp = $null

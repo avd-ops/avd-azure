@@ -4,6 +4,20 @@
 //   2. Register-AvdAgent run command (agent + boot loader + token)
 // Both scripts live in scripts/sessionhost/ and are embedded at compile time.
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
+
+@description('Session and host hardening profile (itar-cui by default when cloud == usgov; standard otherwise).')
+@allowed([
+  'standard'
+  'itar-cui'
+])
+param complianceProfile string = (cloud == 'usgov' ? 'itar-cui' : 'standard')
+
 param location string
 param tags object
 param count int
@@ -51,6 +65,7 @@ var roles = {
 // 11-char prefix + '-' + 3-digit index = 15 chars, the Windows computer-name limit.
 var vmNames = [for i in range(0, count): '${namePrefix}-${padLeft(i + 1, 3, '0')}']
 var intuneMdmId = '0000000a-0000-0000-c000-000000000000'
+var loginAuthority = az.environment().authentication.loginEndpoint
 
 module vm 'br/public:avm/res/compute/virtual-machine:0.22.3' = [
   for (vmName, i) in vmNames: {
@@ -155,6 +170,14 @@ resource configureFslogix 'Microsoft.Compute/virtualMachines/runCommands@2024-07
           name: 'LocalAdminUsername'
           value: localAdminUsername
         }
+        {
+          name: 'Cloud'
+          value: cloud
+        }
+        {
+          name: 'ComplianceProfile'
+          value: complianceProfile
+        }
       ]
       asyncExecution: false
       treatFailureAsDeploymentFailure: true
@@ -176,6 +199,16 @@ resource registerAgent 'Microsoft.Compute/virtualMachines/runCommands@2024-07-01
       source: {
         script: loadTextContent('../../scripts/sessionhost/Register-AvdAgent.ps1')
       }
+      parameters: [
+        {
+          name: 'Cloud'
+          value: cloud
+        }
+        {
+          name: 'ComplianceProfile'
+          value: complianceProfile
+        }
+      ]
       protectedParameters: [
         {
           name: 'RegistrationToken'
@@ -224,3 +257,4 @@ resource powerOnOff 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (d
 }
 
 output names string[] = vmNames
+output loginAuthority string = loginAuthority

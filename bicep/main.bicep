@@ -32,6 +32,20 @@ param namePrefix string
 ])
 param environmentName string
 
+@description('Cloud environment profile (commercial = AzureCloud + Commercial M365; usgov = AzureUSGovernment + M365 GCC High).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
+
+@description('Session and host hardening profile (itar-cui by default when cloud == usgov; standard otherwise).')
+@allowed([
+  'standard'
+  'itar-cui'
+])
+param complianceProfile string = (cloud == 'usgov' ? 'itar-cui' : 'standard')
+
 @description('Azure region for all regional resources.')
 param location string = deployment().location
 
@@ -151,8 +165,10 @@ param localAdminUsername string = 'avdbreakglass'
 @minLength(14)
 param localAdminPassword string
 
-@description('RDP properties for the host pool. Defaults: Entra SSO on; drive, COM and USB redirection off.')
-param rdpProperties string = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
+@description('RDP properties for the host pool. Defaults: itar-cui lockdown when complianceProfile == itar-cui; otherwise Entra SSO on with drive, COM and USB redirection off.')
+param rdpProperties string = complianceProfile == 'itar-cui'
+  ? 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
+  : 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
 
 @description('Mark the host pool as a validation pool (gets AVD service updates first). Recommended for non-prod.')
 param validationEnvironment bool = environmentName != 'prod'
@@ -253,8 +269,14 @@ param autoShutdownRunbookUri string = 'https://raw.githubusercontent.com/avd-ops
 @description('Add an operator jumpbox: a small Linux or Windows Server VM in the spoke with the Cloud Shell toolchain, reached in the browser through Azure Bastion Developer (no charge, no public IP). Off by default. Bastion Developer exists only in some regions (Get-AvdBastionDeveloperRegion).')
 param deployJumpbox bool = false
 
+@description('Whether the target cloud supports Azure Bastion Developer SKU (C26 capabilities.bastionDeveloperSku; false in usgov, where Bastion Basic with AzureBastionSubnet is used).')
+param bastionDeveloperSku bool = cloud != 'usgov'
+
 @description('Jumpbox subnet (inside the spoke).')
 param jumpboxSubnetPrefix string = '10.100.2.32/28'
+
+@description('AzureBastionSubnet prefix inside the spoke VNet (/26 or larger; deployed when deployJumpbox is true and bastionDeveloperSku is false).')
+param bastionSubnetPrefix string = '10.100.2.64/26'
 
 @description('Jumpbox operating system: Linux (Ubuntu 24.04, the default) or Windows (Windows Server 2025).')
 @allowed([
@@ -505,6 +527,7 @@ resource rgJumpbox 'Microsoft.Resources/resourceGroups@2024-03-01' = if (deployJ
 module governance 'modules/governance.bicep' = {
   name: take('avdlz-governance-${baseName}-${location}', 64)
   params: {
+    cloud: cloud
     location: location
     baseName: baseName
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
@@ -561,6 +584,8 @@ module network 'modules/network.bicep' = {
     imageBuildAciSubnetPrefix: imageBuildAciSubnetPrefix
     deployJumpboxSubnet: deployJumpbox
     jumpboxSubnetPrefix: jumpboxSubnetPrefix
+    deployBastionSubnet: deployJumpbox && !bastionDeveloperSku
+    bastionSubnetPrefix: bastionSubnetPrefix
   }
 }
 
@@ -568,6 +593,7 @@ module privateDns 'modules/privateDns.bicep' = if (deployAnyLocalDns) {
   name: 'avdlz-private-dns'
   scope: rgNetwork
   params: {
+    cloud: cloud
     tags: allTags
     vnetResourceId: network.outputs.vnetResourceId
     deployFileZone: deployFileZone
@@ -591,6 +617,7 @@ module keyVault 'modules/keyVault.bicep' = {
   name: 'avdlz-keyvault'
   scope: rgManagement
   params: {
+    cloud: cloud
     location: location
     tags: allTags
     name: names.keyVault
@@ -610,6 +637,7 @@ module storage 'modules/storage.bicep' = {
   name: 'avdlz-storage'
   scope: rgStorage
   params: {
+    cloud: cloud
     location: location
     tags: allTags
     name: names.storage
@@ -649,6 +677,8 @@ module additionalControlPlanePools 'modules/additionalPool.bicep' = [
     name: take('avdlz-control-plane-pool-${i + 2}', 64)
     scope: rgControlPlane
     params: {
+      cloud: cloud
+      complianceProfile: complianceProfile
       location: location
       tags: allTags
       baseName: baseName
@@ -674,6 +704,8 @@ module controlPlane 'modules/controlPlane.bicep' = {
     additionalControlPlanePools
   ]
   params: {
+    cloud: cloud
+    complianceProfile: complianceProfile
     location: location
     tags: allTags
     hostPoolName: primaryHostPoolName
@@ -714,6 +746,8 @@ module sessionHosts 'modules/sessionHosts.bicep' = {
   name: 'avdlz-session-hosts'
   scope: rgHosts
   params: {
+    cloud: cloud
+    complianceProfile: complianceProfile
     location: location
     tags: allTags
     count: int(primaryPool.?sessionHostCount ?? sessionHostCount)
@@ -745,6 +779,8 @@ module additionalSessionHosts 'modules/sessionHosts.bicep' = [
       sessionHosts
     ]
     params: {
+      cloud: cloud
+      complianceProfile: complianceProfile
       location: location
       tags: allTags
       count: int(pool.?sessionHostCount ?? sessionHostCount)
@@ -781,6 +817,7 @@ module autoShutdown 'modules/autoShutdown.bicep' = if (enableAutoShutdown) {
   name: 'avdlz-auto-shutdown'
   scope: rgManagement
   params: {
+    cloud: cloud
     location: location
     tags: allTags
     baseName: baseName
@@ -821,12 +858,16 @@ module autoShutdownRbacHosts 'modules/autoShutdownRbac.bicep' = if (enableAutoSh
 }
 
 // =====================================================================
-// 9. OPERATOR JUMPBOX — opt-in, through Bastion Developer (decision 0019)
+// 9. OPERATOR JUMPBOX — opt-in, through Bastion Developer or Basic in usgov (decision 0019, decision 0013)
 // =====================================================================
 module bastion 'modules/bastionDeveloper.bicep' = if (deployJumpbox) {
   name: 'avdlz-bastion'
   scope: rgNetwork
   params: {
+    cloud: cloud
+    bastionDeveloperSku: bastionDeveloperSku
+    bastionFallbackSku: 'Basic'
+    bastionSubnetResourceId: network.outputs.bastionSubnetResourceId
     location: location
     tags: allTags
     name: names.bastion
@@ -839,6 +880,7 @@ module jumpbox 'modules/jumpbox.bicep' = if (deployJumpbox) {
   name: 'avdlz-jumpbox'
   scope: rgJumpbox
   params: {
+    cloud: cloud
     location: location
     tags: allTags
     vmName: names.jumpbox
@@ -857,6 +899,8 @@ module jumpbox 'modules/jumpbox.bicep' = if (deployJumpbox) {
 }
 
 // ---------- Outputs ----------
+output cloud string = cloud
+output complianceProfile string = complianceProfile
 output resourceGroups object = {
   network: rgNetwork.name
   management: rgManagement.name

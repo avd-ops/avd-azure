@@ -12,6 +12,13 @@
 // One-time tenant step Bicep cannot do: grant admin consent to the storage
 // account's Entra app registration. See docs/deploy.md.
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
+
 param location string
 param tags object
 param name string
@@ -124,6 +131,9 @@ module account 'br/public:avm/res/storage/storage-account:0.33.1' = {
   }
 }
 
+var storageEndpointSuffix = cloud == 'usgov' ? 'core.usgovcloudapi.net' : az.environment().suffixes.storage
+
 output name string = account.outputs.name
 output resourceId string = account.outputs.resourceId
-output profileShareUncPath string = '\\\\${account.outputs.name}.file.${environment().suffixes.storage}\\${shareName}'
+output storageEndpointSuffix string = storageEndpointSuffix
+output profileShareUncPath string = '\\\\${account.outputs.name}.file.${storageEndpointSuffix}\\${shareName}'

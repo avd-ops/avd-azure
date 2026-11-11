@@ -2,6 +2,22 @@
   "version": 1,
   "reviewed": "2026-10-21",
   "reference": "Microsoft's security baseline for the host's Windows release (Intune baseline when enrolled, otherwise the Security Compliance Toolkit). This profile lists the controls the landing zone checks on its hosts and its departures from that baseline.",
+  "complianceProfiles": {
+    "standard": {
+      "description": "Default commercial AVD security baseline."
+    },
+    "itar-cui": {
+      "description": "FedRAMP High, DoD IL4/IL5, CMMC 2.0 Level 2/3, and ITAR/EAR CUI compliance profile for Azure US Government and GCC High.",
+      "enforcedControls": [
+        "screen-capture-protection",
+        "watermarking",
+        "fips-140-mode",
+        "tls-12-baseline",
+        "itar-redirection-lockdown"
+      ],
+      "customRdpProperty": "redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0"
+    }
+  },
   "controls": [
     {
       "id": "vbs-running",
@@ -103,9 +119,48 @@
       "observed": "screenCaptureProtection",
       "test": { "in": [1, 2] },
       "setBy": "organization",
-      "departure": "Screen capture protection blocks screen sharing in some meeting apps; whether the data on the desktop needs it is the organization's choice.",
+      "departure": "Screen capture protection blocks screen sharing in some meeting apps; enforced automatically when complianceProfile is itar-cui.",
       "refs": ["screen-capture-protection#host-policy", "avd-security-guide#device-redirection"],
-      "remediation": "Turn on screen capture protection by policy (fEnableScreenCaptureProtect)."
+      "remediation": "Turn on screen capture protection by policy (fEnableScreenCaptureProtect) or deploy with complianceProfile = 'itar-cui'."
+    },
+    {
+      "id": "watermarking",
+      "title": "Session watermarking on",
+      "observed": "watermarking",
+      "test": { "eq": 1 },
+      "setBy": "organization",
+      "departure": "Watermarking overlays a QR code on the session desktop; enforced automatically when complianceProfile is itar-cui for CUI/ITAR screen exfiltration deterrence.",
+      "refs": ["avd-security-guide#device-redirection"],
+      "remediation": "Turn on watermarking by policy (fEnableWatermarking) or deploy with complianceProfile = 'itar-cui'."
+    },
+    {
+      "id": "fips-140-mode",
+      "title": "FIPS 140 cryptographic mode enabled",
+      "observed": "fipsModeEnabled",
+      "test": { "eq": 1 },
+      "setBy": "organization",
+      "departure": "FIPS 140 mode is required for FedRAMP High, DoD IL4/IL5, and CMMC Level 2/3 (itar-cui profile), but left off in standard commercial deployments to avoid legacy app compatibility issues.",
+      "refs": ["windows-security-baselines#baselines-published", "mcsb-avd-baseline#DP-3"],
+      "remediation": "Enable System cryptography: Use FIPS compliant algorithms (HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\FIPSAlgorithmPolicy\\Enabled = 1) or deploy with complianceProfile = 'itar-cui'."
+    },
+    {
+      "id": "tls-12-baseline",
+      "title": "TLS 1.2+ enforced and legacy TLS 1.0/1.1 disabled",
+      "observed": "tls12Enabled",
+      "test": { "eq": true },
+      "setBy": "windows",
+      "refs": ["mcsb-avd-baseline#DP-3", "avd-security-guide#os-hardening"],
+      "remediation": "Disable TLS 1.0 and TLS 1.1 under SCHANNEL Protocols and enable TLS 1.2 and .NET SchUseStrongCrypto."
+    },
+    {
+      "id": "itar-redirection-lockdown",
+      "title": "Clipboard, printer, drive, COM, and PnP redirection disabled (ITAR/CUI lockdown)",
+      "observed": "redirectionLockdown",
+      "test": { "eq": true },
+      "setBy": "organization",
+      "departure": "Standard commercial deployments block drive, printer, COM, smartcard, and USB redirection at the host pool; full host-level Terminal Services registry lockdown and camera/audio-capture lockdown are enforced when complianceProfile is itar-cui.",
+      "refs": ["avd-security-guide#device-redirection"],
+      "remediation": "Deploy with complianceProfile = 'itar-cui' or disable Terminal Services clipboard, printer, drive, COM, and PnP redirection in HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services."
     },
     {
       "id": "local-admins",

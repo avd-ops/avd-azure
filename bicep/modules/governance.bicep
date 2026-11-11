@@ -8,13 +8,27 @@
 
 targetScope = 'subscription'
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
 param location string
 param baseName string
 param logAnalyticsWorkspaceResourceId string
 param enablePolicyGuardrails bool
 @description('Export the subscription activity log to the workspace (one landing zone per subscription does).')
 param deployActivityLog bool = true
-param allowedLocations string[]
+param allowedLocations string[] = cloud == 'usgov'
+  ? [
+      'usgovvirginia'
+      'usgovarizona'
+      'usgovtexas'
+    ]
+  : [
+      location
+    ]
 param enableDefenderForCloud bool
 param monthlyBudgetAmount int
 param budgetStartDate string
@@ -23,6 +37,13 @@ param alertEmailAddresses string[]
 @description('Action group the budget calls at budgetActionPercent of actual cost (the auto-shutdown trigger). Empty = none.')
 param budgetActionGroupId string = ''
 param budgetActionPercent int = 100
+
+var usGovAllowedLocations = [
+  'usgovvirginia'
+  'usgovarizona'
+  'usgovtexas'
+]
+var effectiveAllowedLocations = cloud == 'usgov' ? usGovAllowedLocations : allowedLocations
 
 // Built-in policy definitions.
 resource allowedLocationsDefinition 'Microsoft.Authorization/policyDefinitions@2023-04-01' existing = {
@@ -59,7 +80,7 @@ resource allowedLocationsAssignment 'Microsoft.Authorization/policyAssignments@2
     metadata: assignmentMetadata
     policyDefinitionId: allowedLocationsDefinition.id
     parameters: {
-      listOfAllowedLocations: { value: allowedLocations }
+      listOfAllowedLocations: { value: effectiveAllowedLocations }
     }
   }
 }
@@ -72,7 +93,7 @@ resource allowedRgLocationsAssignment 'Microsoft.Authorization/policyAssignments
     metadata: assignmentMetadata
     policyDefinitionId: allowedRgLocationsDefinition.id
     parameters: {
-      listOfAllowedLocations: { value: allowedLocations }
+      listOfAllowedLocations: { value: effectiveAllowedLocations }
     }
   }
 }

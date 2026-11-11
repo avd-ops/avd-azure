@@ -22,7 +22,11 @@ this profile records the controls checked here and the landing zone's departures
 | `smb1-off` | SMB 1.0 server off | Windows | |
 | `idle-limit` | An idle session limit | Organization | Depends on how people work; the landing zone limits disconnected sessions |
 | `screen-lock` | Lock after 15 minutes or less | Organization | Usually the organization's device policy |
-| `screen-capture-protection` | On | Organization | Blocks screen sharing in some meeting apps |
+| `screen-capture-protection` | On | Organization | Blocks screen sharing in some meeting apps; enforced in `itar-cui` |
+| `watermarking` | On (1) | Organization | Overlays QR watermark; enforced in `itar-cui` |
+| `fips-140-mode` | Enabled (1) | Organization | Required for FedRAMP High / DoD IL4-5 / CMMC (`itar-cui`) |
+| `tls-12-baseline` | TLS 1.2+ on, TLS 1.0/1.1 off | Windows | |
+| `itar-redirection-lockdown` | Host-level Terminal Services redirection disabled | Organization | Full host-level registry lockdown enforced in `itar-cui` |
 | `local-admins` | No extra local administrators | Image | |
 
 **Outcomes:** pass; departure (the profile records why); gap (drift nobody recorded); unknown (the

@@ -48,6 +48,12 @@ param deployJumpboxSubnet bool = false
 @description('Jumpbox subnet (a /28 in the spoke\'s free range).')
 param jumpboxSubnetPrefix string = '10.100.2.32/28'
 
+@description('Deploy AzureBastionSubnet (/26) when the jumpbox is enabled in a cloud where Bastion Developer SKU is unavailable (usgov).')
+param deployBastionSubnet bool = false
+
+@description('AzureBastionSubnet address prefix (/26 in the spoke\'s free range).')
+param bastionSubnetPrefix string = '10.100.2.64/26'
+
 var isHub = connectivityMode == 'HubPeered'
 var useRouteTable = isHub && !empty(hubFirewallPrivateIp)
 var diagnostics = [
@@ -353,6 +359,14 @@ module vnet 'br/public:avm/res/network/virtual-network:0.10.2' = {
             routeTableResourceId: useRouteTable ? routeTable!.outputs.resourceId : null
           }
         ]
+      : [], deployBastionSubnet
+      ? [
+          {
+            name: 'AzureBastionSubnet'
+            addressPrefix: bastionSubnetPrefix
+            defaultOutboundAccess: false
+          }
+        ]
       : [])
     peerings: isHub
       ? [
@@ -378,3 +392,6 @@ output imageBuildSubnetResourceId string = deployImageBuildSubnets ? vnet.output
 output imageBuildAciSubnetResourceId string = deployImageBuildSubnets ? vnet.outputs.subnetResourceIds[3] : ''
 // The jumpbox subnet comes after the image build subnets when both are there.
 output jumpboxSubnetResourceId string = deployJumpboxSubnet ? vnet.outputs.subnetResourceIds[deployImageBuildSubnets ? 4 : 2] : ''
+output bastionSubnetResourceId string = deployBastionSubnet
+  ? vnet.outputs.subnetResourceIds[(deployImageBuildSubnets ? 4 : 2) + (deployJumpboxSubnet ? 1 : 0)]
+  : ''

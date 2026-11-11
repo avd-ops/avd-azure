@@ -2,12 +2,28 @@
 // Deployed in the control-plane resource group alongside the primary host pool; outputs its
 // registrationToken so main.bicep can register that pool's session hosts.
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
+
+@description('Session and host hardening profile (itar-cui by default when cloud == usgov; standard otherwise).')
+@allowed([
+  'standard'
+  'itar-cui'
+])
+param complianceProfile string = (cloud == 'usgov' ? 'itar-cui' : 'standard')
+
 param location string
 param tags object
 param baseName string
 param pool object
 param defaultMaxSessionLimit int = 8
-param defaultRdpProperties string
+param defaultRdpProperties string = complianceProfile == 'itar-cui'
+  ? 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
+  : 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
 param defaultValidationEnvironment bool = false
 param defaultStartVmOnConnect bool = true
 param defaultScalingTimeZone string = 'UTC'
@@ -17,6 +33,9 @@ param privateEndpointSubnetResourceId string
 param privateEndpointResourceGroupResourceId string = ''
 param avdPrivateDnsZoneResourceId string = ''
 param logAnalyticsWorkspaceResourceId string
+
+var standardRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
+var itarCuiRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
 
 var diagnostics = [
   {
@@ -40,7 +59,10 @@ var preferredAppGroupType = rawPrefAppGroup == 'RailApplications'
   ? 'RailApplications'
   : (rawPrefAppGroup == 'None' ? 'None' : 'Desktop')
 var maxSessionLimit = int(pool.?maxSessionLimit ?? defaultMaxSessionLimit)
-var rdpProperties = string(pool.?rdpProperties ?? defaultRdpProperties)
+var effectiveDefaultRdpProps = complianceProfile == 'itar-cui' && (empty(defaultRdpProperties) || defaultRdpProperties == standardRdpProperties)
+  ? itarCuiRdpProperties
+  : defaultRdpProperties
+var rdpProperties = string(pool.?rdpProperties ?? effectiveDefaultRdpProps)
 var validationEnvironment = bool(pool.?validationEnvironment ?? defaultValidationEnvironment)
 var startVmOnConnect = bool(pool.?startVmOnConnect ?? defaultStartVmOnConnect)
 var scalingTimeZone = string(pool.?scalingTimeZone ?? defaultScalingTimeZone)
@@ -59,7 +81,7 @@ module hostPool 'br/public:avm/res/desktop-virtualization/host-pool:0.8.1' = {
   params: {
     name: hostPoolName
     location: location
-    tags: union(tags, startVmOnConnect ? {} : { 'avdlz-start-vm-on-connect': 'false' })
+    tags: union(tags, { 'avdlz-cloud': cloud, 'avdlz-compliance-profile': complianceProfile }, startVmOnConnect ? {} : { 'avdlz-start-vm-on-connect': 'false' })
     friendlyName: friendlyName
     hostPoolType: hostPoolType
     personalDesktopAssignmentType: hostPoolType == 'Personal' ? personalAssignmentType : null

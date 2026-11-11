@@ -3,6 +3,20 @@
 // Diagnostics from every object go to Log Analytics (that's what AVD Insights
 // and the alerts read).
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
+
+@description('Session and host hardening profile (itar-cui by default when cloud == usgov; standard otherwise).')
+@allowed([
+  'standard'
+  'itar-cui'
+])
+param complianceProfile string = (cloud == 'usgov' ? 'itar-cui' : 'standard')
+
 param location string
 param tags object
 
@@ -13,7 +27,9 @@ param appGroupName string
 param workspaceName string
 param scalingPlanName string
 param maxSessionLimit int
-param rdpProperties string
+param rdpProperties string = complianceProfile == 'itar-cui'
+  ? 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
+  : 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
 param validationEnvironment bool
 param enableAvdPrivateLink bool
 param privateEndpointSubnetResourceId string
@@ -53,7 +69,7 @@ param enableAvdFeedPrivateLink bool = false
 @description('Enable workspace global Private Link on the primary workspace by default.')
 param enableAvdGlobalPrivateLink bool = false
 
-@description('Private DNS zone resource ID for privatelink-global.wvd.microsoft.com (used when global workspace Private Link is enabled).')
+@description('Private DNS zone resource ID for the global AVD Private Link zone (used when global workspace Private Link is enabled).')
 param avdGlobalPrivateDnsZoneResourceId string = ''
 
 @description('Additional application groups beyond the primary one (topology.appGroups[1..]).')
@@ -64,6 +80,9 @@ param additionalWorkspaces array = []
 
 @description('Extra application group names (from additionalAppGroups) assigned to the primary workspace.')
 param primaryWorkspaceExtraAppGroupNames string[] = []
+
+var standardRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
+var itarCuiRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
 
 var roles = {
   desktopVirtualizationUser: '1d18fff3-a72a-46b5-b4a9-0b38a3cd7e63'
@@ -86,7 +105,10 @@ var primaryPrefAgType = rawPrimaryPrefAg == 'RailApplications'
   ? 'RailApplications'
   : (rawPrimaryPrefAg == 'None' ? 'None' : 'Desktop')
 var primaryMaxSessions = int(primaryPool.?maxSessionLimit ?? maxSessionLimit)
-var primaryRdpProps = string(primaryPool.?rdpProperties ?? rdpProperties)
+var effectiveDefaultRdpProps = complianceProfile == 'itar-cui' && (empty(rdpProperties) || rdpProperties == standardRdpProperties)
+  ? itarCuiRdpProperties
+  : rdpProperties
+var primaryRdpProps = string(primaryPool.?rdpProperties ?? effectiveDefaultRdpProps)
 var primaryValidation = bool(primaryPool.?validationEnvironment ?? validationEnvironment)
 var primaryStartOnConnect = bool(primaryPool.?startVmOnConnect ?? startVmOnConnect)
 var primaryScalingTz = string(primaryPool.?scalingTimeZone ?? scalingTimeZone)
@@ -106,7 +128,7 @@ module hostPool 'br/public:avm/res/desktop-virtualization/host-pool:0.8.1' = {
   params: {
     name: hostPoolName
     location: location
-    tags: union(tags, hostPoolStateTags, primaryStartOnConnect ? {} : { 'avdlz-start-vm-on-connect': 'false' })
+    tags: union(tags, hostPoolStateTags, { 'avdlz-cloud': cloud, 'avdlz-compliance-profile': complianceProfile }, primaryStartOnConnect ? {} : { 'avdlz-start-vm-on-connect': 'false' })
     friendlyName: primaryHpFriendlyName
     hostPoolType: primaryPoolType
     personalDesktopAssignmentType: primaryPoolType == 'Personal' ? primaryPersonalAssignment : null
