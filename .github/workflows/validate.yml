@@ -41,7 +41,7 @@ jobs:
           AVD_LOCAL_ADMIN_PASSWORD: "Placeholder-only-for-build-1!"
         run: |
           for p in parameters/dev.bicepparam parameters/test.bicepparam parameters/prod.bicepparam; do
-            out=$(az bicep build-params --file "$p" --stdout)
+            out=$(az bicep build-params --file "$p" --stdout | jq -r .parametersJson)
             echo "$out" | grep -q '"usgov"'
             echo "$out" | grep -q '"itar-cui"'
             echo "$out" | grep -q '"usgovvirginia"'
