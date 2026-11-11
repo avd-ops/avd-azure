@@ -174,6 +174,8 @@ Describe 'Session host security baseline and deploy.sh cloud boundary checks' {
     $deploySh = Get-Content -Path (Join-Path $script:RepoRoot 'scripts/deploy/deploy.sh') -Raw
     $deploySh | Should -Match '--cloud\)'
     $deploySh | Should -Match '--compliance-profile\)'
+    $deploySh | Should -Match '--output-manifest\)'
+    $deploySh | Should -Match 'avd-ops-azure-outputs/v1'
     $deploySh | Should -Match 'AzureUSGovernment'
     $deploySh | Should -Match 'Cloud boundary mismatch'
     $deploySh | Should -Match 'https://graph\.microsoft\.us'

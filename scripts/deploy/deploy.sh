@@ -10,6 +10,7 @@
 #       [--auto-shutdown 20:00|none --start-vm-on-connect true|false] [--unlock] \
 #       [--topology <json-or-file>] \
 #       [--image-id <gallery image version ID> [--generation a|b]] \
+#       [--output-manifest <azure-outputs.json>] \
 #       [--jumpbox [--jumpbox-os linux|windows] [--jumpbox-keep-running <yyyy-MM-ddTHH:mmZ>]]
 #
 # -s is the subscription (ID or name) to deploy to. Without it, the subscription az has
@@ -71,6 +72,7 @@ JUMPBOX_OS="${AVD_JUMPBOX_OS:-}"
 TOPOLOGY="${AVD_TOPOLOGY_JSON:-}"
 CLOUD="${AVD_CLOUD:-commercial}"
 COMPLIANCE_PROFILE="${AVD_COMPLIANCE_PROFILE:-}"
+OUTPUT_MANIFEST="${AVD_AZURE_OUTPUTS_PATH:-}"
 AVD_APP_ID="9cdead84-a844-4324-93f2-b2e6bb768d07"   # Azure Virtual Desktop first-party app
 
 usage() {
@@ -103,6 +105,7 @@ while [[ $# -gt 0 ]]; do
     --jumpbox-keep-running) JUMPBOX_KEEP_RUNNING="$2"; shift 2 ;;
     --jumpbox-os) JUMPBOX_OS="$2"; shift 2 ;;
     --topology) TOPOLOGY="$2"; shift 2 ;;
+    --output-manifest) OUTPUT_MANIFEST="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -541,6 +544,42 @@ STORAGE_NAME=$(arm deployment sub show -n "$DEPLOY_NAME" --query properties.outp
 # rg-<prefix>-<env>-avd -> <prefix> and <env>, for the post-deployment command.
 BASE_NAME=$(arm deployment sub show -n "$DEPLOY_NAME" --query properties.outputs.resourceGroups.value.controlPlane -o tsv)
 BASE_NAME=${BASE_NAME#rg-}; BASE_NAME=${BASE_NAME%-avd}
+
+if [[ -n "$OUTPUT_MANIFEST" ]]; then
+  OUT_PREFIX="${BASE_NAME%-*}"
+  OUT_ENV="${BASE_NAME##*-}"
+  mkdir -p "$(dirname "$OUTPUT_MANIFEST")"
+  cat > "$OUTPUT_MANIFEST" <<JSONEOF
+{
+  "schema": "avd-ops-azure-outputs/v1",
+  "cloud": $(json_str "$CLOUD"),
+  "complianceProfile": $(json_str "$COMPLIANCE_PROFILE"),
+  "environment": $(json_str "$OUT_ENV"),
+  "location": $(json_str "$LOCATION"),
+  "resourceGroups": {
+    "controlPlane": $(json_str "rg-$BASE_NAME-avd"),
+    "sessionHosts": $(json_str "rg-$BASE_NAME-hosts"),
+    "network": $(json_str "rg-$BASE_NAME-network"),
+    "storage": $(json_str "rg-$BASE_NAME-storage")
+  },
+  "hostPools": [
+    {
+      "name": $(json_str "vdpool-$BASE_NAME"),
+      "type": "Pooled",
+      "workspace": $(json_str "vdws-$BASE_NAME"),
+      "appGroupIds": [
+        $(json_str "/subscriptions/$SUB_ID/resourceGroups/rg-$BASE_NAME-avd/providers/Microsoft.DesktopVirtualization/applicationGroups/vdag-$OUT_PREFIX-$OUT_ENV-desktop")
+      ]
+    }
+  ],
+  "network": {
+    "vnetName": $(json_str "vnet-$BASE_NAME-$LOCATION"),
+    "privateLinkEnabled": true
+  }
+}
+JSONEOF
+  echo "==> Wrote Azure handoff manifest ($OUTPUT_MANIFEST)"
+fi
 
 cat <<EOF
 
