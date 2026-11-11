@@ -12,6 +12,13 @@
 // One-time tenant step Bicep cannot do: grant admin consent to the storage
 // account's Entra app registration. See docs/deploy.md.
 
+@description('Cloud environment profile (commercial or usgov).')
+@allowed([
+  'commercial'
+  'usgov'
+])
+param cloud string = 'commercial'
+
 param location string
 param tags object
 param name string

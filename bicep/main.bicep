@@ -165,11 +165,10 @@ param localAdminUsername string = 'avdbreakglass'
 @minLength(14)
 param localAdminPassword string
 
-var standardRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
-var itarCuiRdpProperties = 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
-
 @description('RDP properties for the host pool. Defaults: itar-cui lockdown when complianceProfile == itar-cui; otherwise Entra SSO on with drive, COM and USB redirection off.')
-param rdpProperties string = complianceProfile == 'itar-cui' ? itarCuiRdpProperties : standardRdpProperties
+param rdpProperties string = complianceProfile == 'itar-cui'
+  ? 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
+  : 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
 
 @description('Mark the host pool as a validation pool (gets AVD service updates first). Recommended for non-prod.')
 param validationEnvironment bool = environmentName != 'prod'
@@ -270,8 +269,14 @@ param autoShutdownRunbookUri string = 'https://raw.githubusercontent.com/avd-ops
 @description('Add an operator jumpbox: a small Linux or Windows Server VM in the spoke with the Cloud Shell toolchain, reached in the browser through Azure Bastion Developer (no charge, no public IP). Off by default. Bastion Developer exists only in some regions (Get-AvdBastionDeveloperRegion).')
 param deployJumpbox bool = false
 
+@description('Whether the target cloud supports Azure Bastion Developer SKU (C26 capabilities.bastionDeveloperSku; false in usgov, where Bastion Basic with AzureBastionSubnet is used).')
+param bastionDeveloperSku bool = cloud != 'usgov'
+
 @description('Jumpbox subnet (inside the spoke).')
 param jumpboxSubnetPrefix string = '10.100.2.32/28'
+
+@description('AzureBastionSubnet prefix inside the spoke VNet (/26 or larger; deployed when deployJumpbox is true and bastionDeveloperSku is false).')
+param bastionSubnetPrefix string = '10.100.2.64/26'
 
 @description('Jumpbox operating system: Linux (Ubuntu 24.04, the default) or Windows (Windows Server 2025).')
 @allowed([

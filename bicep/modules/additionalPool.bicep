@@ -21,7 +21,9 @@ param tags object
 param baseName string
 param pool object
 param defaultMaxSessionLimit int = 8
-param defaultRdpProperties string = complianceProfile == 'itar-cui' ? itarCuiRdpProperties : standardRdpProperties
+param defaultRdpProperties string = complianceProfile == 'itar-cui'
+  ? 'enablerdsaadauth:i:1;targetisaadjoined:i:1;redirectclipboard:i:0;redirectprinters:i:0;drivestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:0;usbdevicestoredirect:s:;camerastoredirect:s:;audiocapturemode:i:0;encode redirected video capture:i:0;redirectwebauthn:i:1;audiomode:i:0;use multimon:i:1'
+  : 'enablerdsaadauth:i:1;targetisaadjoined:i:1;drivestoredirect:s:;usbdevicestoredirect:s:;redirectcomports:i:0;redirectsmartcards:i:1;redirectprinters:i:1;redirectclipboard:i:1;redirectwebauthn:i:1;audiomode:i:0;audiocapturemode:i:1;camerastoredirect:s:*;use multimon:i:1'
 param defaultValidationEnvironment bool = false
 param defaultStartVmOnConnect bool = true
 param defaultScalingTimeZone string = 'UTC'
