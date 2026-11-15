@@ -30,10 +30,18 @@ Describe 'C31 avd-networking-outputs/v1 wiring in avd-azure' {
     $mainText | Should -Match 'centralPrivateDnsZoneResourceIds\.\?avdGlobal'
   }
 
-  It 'supports --networking-outputs in scripts/deploy/deploy.sh' {
+  It 'supports --networking-outputs and cygpath normalization in scripts/deploy/deploy.sh' {
     $deployText = Get-Content -Path (Join-Path $script:RepoRoot 'scripts/deploy/deploy.sh') -Raw
     $deployText | Should -Match '--networking-outputs'
     $deployText | Should -Match 'avd-networking-outputs/v1'
     $deployText | Should -Match 'AVD_CONNECTIVITY_MODE="HubPeered"'
+    $deployText | Should -Match 'cygpath -m'
+  }
+
+  It 'links central Private DNS zones to the spoke VNet when HubPeered and createHubToSpokePeering are enabled' {
+    $mainText = Get-Content -Path (Join-Path $script:RepoRoot 'bicep/main.bicep') -Raw
+    $mainText | Should -Match 'centralDnsLink\.bicep'
+    $mainText | Should -Match "connectivityMode == 'HubPeered' && createHubToSpokePeering"
+    Test-Path (Join-Path $script:RepoRoot 'bicep/modules/centralDnsLink.bicep') | Should -BeTrue
   }
 }

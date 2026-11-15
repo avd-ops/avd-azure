@@ -143,6 +143,9 @@ fi
 [[ -z "$CREATE_HUB_PEERING" || "$CREATE_HUB_PEERING" == true || "$CREATE_HUB_PEERING" == false ]] || { echo "--create-hub-peering takes true or false: '$CREATE_HUB_PEERING'"; exit 1; }
 if [[ -n "$NETWORKING_OUTPUTS" ]]; then
   [[ -f "$NETWORKING_OUTPUTS" ]] || { echo "Networking outputs file not found: $NETWORKING_OUTPUTS" >&2; exit 1; }
+  if command -v cygpath >/dev/null 2>&1; then
+    NETWORKING_OUTPUTS=$(cygpath -m "$NETWORKING_OUTPUTS")
+  fi
   command -v jq >/dev/null 2>&1 || { echo "jq is required to parse --networking-outputs ($NETWORKING_OUTPUTS)" >&2; exit 1; }
   NET_SCHEMA=$(jq -r '.schema // ""' "$NETWORKING_OUTPUTS")
   [[ "$NET_SCHEMA" == "avd-networking-outputs/v1" ]] || { echo "Unexpected networking outputs schema '$NET_SCHEMA' (expected avd-networking-outputs/v1): $NETWORKING_OUTPUTS" >&2; exit 1; }
