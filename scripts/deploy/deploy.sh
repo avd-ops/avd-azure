@@ -111,6 +111,7 @@ while [[ $# -gt 0 ]]; do
     --networking-outputs) NETWORKING_OUTPUTS="$2"; shift 2 ;;
     --create-hub-peering) CREATE_HUB_PEERING="$2"; shift 2 ;;
     --output-manifest) OUTPUT_MANIFEST="$2"; shift 2 ;;
+    --azure-outputs) OUTPUT_MANIFEST="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
