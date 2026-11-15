@@ -30,7 +30,12 @@ param avdServicePrincipalObjectId = readEnvironmentVariable('AVD_SERVICE_PRINCIP
 param localAdminPassword = readEnvironmentVariable('AVD_LOCAL_ADMIN_PASSWORD')
 
 // ---- Connectivity ----
-param connectivityMode = 'Standalone'
+param connectivityMode = empty(readEnvironmentVariable('AVD_CONNECTIVITY_MODE', '')) ? 'Standalone' : readEnvironmentVariable('AVD_CONNECTIVITY_MODE', '')
+param hubVnetResourceId = readEnvironmentVariable('AVD_HUB_VNET_ID', '')
+param createHubToSpokePeering = empty(readEnvironmentVariable('AVD_CREATE_HUB_PEERING', '')) ? true : bool(readEnvironmentVariable('AVD_CREATE_HUB_PEERING', ''))
+param hubFirewallPrivateIp = readEnvironmentVariable('AVD_HUB_FIREWALL_IP', '')
+param dnsServers = json(empty(readEnvironmentVariable('AVD_DNS_SERVERS_JSON', '')) ? '[]' : readEnvironmentVariable('AVD_DNS_SERVERS_JSON', ''))
+param centralPrivateDnsZoneResourceIds = json(empty(readEnvironmentVariable('AVD_CENTRAL_DNS_ZONES_JSON', '')) ? '{}' : readEnvironmentVariable('AVD_CENTRAL_DNS_ZONES_JSON', ''))
 // Golden image build subnets (build/specs/image-pipeline-spec.md): only in the image build environment.
 // AVD_IMAGE_BUILD_SUBNETS=true adds them (empty = off).
 param deployImageBuildSubnets = empty(readEnvironmentVariable('AVD_IMAGE_BUILD_SUBNETS', '')) ? false : bool(readEnvironmentVariable('AVD_IMAGE_BUILD_SUBNETS', ''))
