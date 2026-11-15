@@ -54,7 +54,27 @@ param deployRoleAssignments bool = true
 @description('Resource ID of the parent AVD host pool. When set, applies cm-resource-parent on the VM, disk, NIC, schedule, extensions, and run commands so Azure Cost Management groups session-host spend under the host pool.')
 param hostPoolResourceId string = ''
 
+@description('Enable Accelerated Networking on session host NICs. Set to false for VM sizes that do not support it.')
+param enableAcceleratedNetworking bool = true
+
+@description('How Azure-distributed GPU drivers are installed on NV-series session hosts: auto deploys the VM extension on Standard_NV* SKUs; extension forces the extension; image assumes drivers are baked into the golden image; none skips driver and policy setup.')
+@allowed([
+  'auto'
+  'extension'
+  'image'
+  'none'
+])
+param gpuDriverMode string = 'auto'
+
+@description('Configure Terminal Services host policies for GPU rendering, H.264/AVC hardware encoding, and AVC 4:4:4 mode on GPU session hosts.')
+param enableGpuGraphicsPolicy bool = true
+
 var hostTags = empty(hostPoolResourceId) ? tags : union(tags, { 'cm-resource-parent': hostPoolResourceId })
+var vmSizeLower = toLower(vmSize)
+var isNvGpu = startsWith(vmSizeLower, 'standard_nv')
+var isAmdGpu = isNvGpu && (contains(vmSizeLower, 'as_v4') || contains(vmSizeLower, 'v710'))
+var deployGpuExtension = (gpuDriverMode == 'extension') || (gpuDriverMode == 'auto' && isNvGpu)
+var applyGpuPolicy = enableGpuGraphicsPolicy && isNvGpu && (gpuDriverMode != 'none')
 
 var roles = {
   vmUserLogin: 'fb879df8-f326-4884-b1cf-06f3ad86be52'
@@ -99,7 +119,7 @@ module vm 'br/public:avm/res/compute/virtual-machine:0.22.3' = [
         {
           nicSuffix: '-nic'
           deleteOption: 'Delete'
-          enableAcceleratedNetworking: true
+          enableAcceleratedNetworking: enableAcceleratedNetworking
           ipConfigurations: [
             {
               name: 'ipconfig1'
@@ -222,6 +242,44 @@ resource registerAgent 'Microsoft.Compute/virtualMachines/runCommands@2024-07-01
     // Run commands on one VM execute one at a time.
     dependsOn: [
       configureFslogix[i]
+    ]
+  }
+]
+
+resource gpuDriverExtension 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = [
+  for (vmName, i) in vmNames: if (deployGpuExtension) {
+    parent: sessionHost[i]
+    name: isAmdGpu ? 'AmdGpuDriverWindows' : 'NvidiaGpuDriverWindows'
+    location: location
+    tags: hostTags
+    properties: {
+      publisher: 'Microsoft.HpcCompute'
+      type: isAmdGpu ? 'AmdGpuDriverWindows' : 'NvidiaGpuDriverWindows'
+      typeHandlerVersion: isAmdGpu ? '1.1' : '1.9'
+      autoUpgradeMinorVersion: true
+    }
+    dependsOn: [
+      vm[i]
+    ]
+  }
+]
+
+resource configureGpuGraphics 'Microsoft.Compute/virtualMachines/runCommands@2024-07-01' = [
+  for (vmName, i) in vmNames: if (applyGpuPolicy) {
+    parent: sessionHost[i]
+    name: 'Configure-GpuGraphics'
+    location: location
+    tags: hostTags
+    properties: {
+      source: {
+        script: loadTextContent('../../scripts/sessionhost/Set-GpuGraphicsPolicy.ps1')
+      }
+      asyncExecution: false
+      treatFailureAsDeploymentFailure: true
+      timeoutInSeconds: 600
+    }
+    dependsOn: [
+      registerAgent[i]
     ]
   }
 ]
