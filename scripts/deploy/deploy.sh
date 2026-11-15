@@ -9,6 +9,7 @@
 #       [--hosts 3 --vm-size Standard_D8as_v5 --max-sessions 16 --profile-quota 600] \
 #       [--auto-shutdown 20:00|none --start-vm-on-connect true|false] [--unlock] \
 #       [--topology <json-or-file>] \
+#       [--networking-outputs <networking-outputs.json>] [--create-hub-peering true|false] \
 #       [--image-id <gallery image version ID> [--generation a|b]] \
 #       [--output-manifest <azure-outputs.json>] \
 #       [--jumpbox [--jumpbox-os linux|windows] [--jumpbox-keep-running <yyyy-MM-ddTHH:mmZ>]]
@@ -70,6 +71,8 @@ JUMPBOX=false
 JUMPBOX_KEEP_RUNNING=""
 JUMPBOX_OS="${AVD_JUMPBOX_OS:-}"
 TOPOLOGY="${AVD_TOPOLOGY_JSON:-}"
+NETWORKING_OUTPUTS="${AVD_NETWORKING_OUTPUTS_PATH:-}"
+CREATE_HUB_PEERING="${AVD_CREATE_HUB_PEERING:-}"
 CLOUD="${AVD_CLOUD:-commercial}"
 COMPLIANCE_PROFILE="${AVD_COMPLIANCE_PROFILE:-}"
 OUTPUT_MANIFEST="${AVD_AZURE_OUTPUTS_PATH:-}"
@@ -105,6 +108,8 @@ while [[ $# -gt 0 ]]; do
     --jumpbox-keep-running) JUMPBOX_KEEP_RUNNING="$2"; shift 2 ;;
     --jumpbox-os) JUMPBOX_OS="$2"; shift 2 ;;
     --topology) TOPOLOGY="$2"; shift 2 ;;
+    --networking-outputs) NETWORKING_OUTPUTS="$2"; shift 2 ;;
+    --create-hub-peering) CREATE_HUB_PEERING="$2"; shift 2 ;;
     --output-manifest) OUTPUT_MANIFEST="$2"; shift 2 ;;
     *) usage ;;
   esac
@@ -135,6 +140,23 @@ if [[ -n "$TOPOLOGY" && -f "$TOPOLOGY" ]]; then
   TOPOLOGY=$(tr -d '\r\n' < "$TOPOLOGY")
 fi
 [[ -z "$TOPOLOGY" || "$TOPOLOGY" =~ ^\{.*\}$ ]] || { echo "--topology takes a JSON object or path to a JSON file: '$TOPOLOGY'"; exit 1; }
+[[ -z "$CREATE_HUB_PEERING" || "$CREATE_HUB_PEERING" == true || "$CREATE_HUB_PEERING" == false ]] || { echo "--create-hub-peering takes true or false: '$CREATE_HUB_PEERING'"; exit 1; }
+if [[ -n "$NETWORKING_OUTPUTS" ]]; then
+  [[ -f "$NETWORKING_OUTPUTS" ]] || { echo "Networking outputs file not found: $NETWORKING_OUTPUTS" >&2; exit 1; }
+  command -v jq >/dev/null 2>&1 || { echo "jq is required to parse --networking-outputs ($NETWORKING_OUTPUTS)" >&2; exit 1; }
+  NET_SCHEMA=$(jq -r '.schema // ""' "$NETWORKING_OUTPUTS")
+  [[ "$NET_SCHEMA" == "avd-networking-outputs/v1" ]] || { echo "Unexpected networking outputs schema '$NET_SCHEMA' (expected avd-networking-outputs/v1): $NETWORKING_OUTPUTS" >&2; exit 1; }
+  AVD_CONNECTIVITY_MODE="HubPeered"
+  AVD_HUB_VNET_ID=$(jq -r '.hubVnetResourceId // ""' "$NETWORKING_OUTPUTS")
+  [[ -n "$AVD_HUB_VNET_ID" ]] || { echo "Missing hubVnetResourceId in $NETWORKING_OUTPUTS" >&2; exit 1; }
+  AVD_HUB_FIREWALL_IP=$(jq -r '.hubFirewallPrivateIp // ""' "$NETWORKING_OUTPUTS")
+  AVD_DNS_SERVERS_JSON=$(jq -c '.dnsServers // []' "$NETWORKING_OUTPUTS")
+  AVD_CENTRAL_DNS_ZONES_JSON=$(jq -c '.centralPrivateDnsZoneResourceIds // {}' "$NETWORKING_OUTPUTS")
+  export AVD_CONNECTIVITY_MODE AVD_HUB_VNET_ID AVD_HUB_FIREWALL_IP AVD_DNS_SERVERS_JSON AVD_CENTRAL_DNS_ZONES_JSON
+fi
+if [[ -n "$CREATE_HUB_PEERING" ]]; then
+  export AVD_CREATE_HUB_PEERING="$CREATE_HUB_PEERING"
+fi
 [[ -z "$GENERATION" || "$GENERATION" == a || "$GENERATION" == b ]] || { echo "--generation takes a or b: '$GENERATION'"; exit 1; }
 # A gallery image version, never a definition or latest (image pipeline spec section 6.1).
 [[ -z "$IMAGE_ID" || "$IMAGE_ID" =~ ^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Compute/galleries/[^/]+/images/[^/]+/versions/[0-9]+\.[0-9]+\.[0-9]+$ ]] \
