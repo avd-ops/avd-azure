@@ -4,7 +4,7 @@
 
 using '../bicep/main.bicep'
 
-param namePrefix = 'avdlz'
+param namePrefix = empty(readEnvironmentVariable('AVD_NAME_PREFIX', '')) ? 'avdlz' : readEnvironmentVariable('AVD_NAME_PREFIX', '')
 param environmentName = 'dev'
 // Sovereign cloud target and compliance profile (contracts/cloud-environments.json, C26).
 param cloud = empty(readEnvironmentVariable('AVD_CLOUD', '')) ? 'commercial' : readEnvironmentVariable('AVD_CLOUD', '')
