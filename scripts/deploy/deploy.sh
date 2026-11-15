@@ -535,12 +535,32 @@ restore_hosts() {
     || echo "    Could not deallocate them; the scaling plan or the scheduled stop will."
 }
 
+# Compile .bicepparam and minify the ARM template JSON so deployments stay under ARM's 4 MB request limit.
+DEPLOY_ARGS=(-p "$PARAM_FILE")
+COMPILED_DIR=""
+cleanup_compiled() {
+  [[ -n "$COMPILED_DIR" ]] && rm -rf "$COMPILED_DIR"
+}
+trap cleanup_compiled EXIT
+if command -v jq >/dev/null 2>&1; then
+  COMPILED_DIR=$(mktemp -d .deploy-tmp.XXXXXX)
+  chmod 700 "$COMPILED_DIR"
+  BUILT_JSON="$COMPILED_DIR/built.json"
+  COMPILED_TEMPLATE="$COMPILED_DIR/main.json"
+  COMPILED_PARAMS="$COMPILED_DIR/params.json"
+  az bicep build-params --file "$PARAM_FILE" --stdout --only-show-errors > "$BUILT_JSON"
+  jq -c '.templateJson | fromjson' "$BUILT_JSON" > "$COMPILED_TEMPLATE"
+  jq -c '.parametersJson | fromjson' "$BUILT_JSON" > "$COMPILED_PARAMS"
+  rm -f "$BUILT_JSON"
+  DEPLOY_ARGS=(--template-file "$COMPILED_TEMPLATE" --parameters "$COMPILED_PARAMS")
+fi
+
 if $WHATIF; then
   if ((${#STOPPED_HOSTS[@]})); then
     echo "    Not running: ${STOPPED_HOSTS[*]##*/}. The deployment starts them first and deallocates them after."
   fi
   echo "==> What-if ($DEPLOY_NAME) — no changes applied"
-  arm deployment sub what-if -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE"
+  arm deployment sub what-if -n "$DEPLOY_NAME" -l "$LOCATION" "${DEPLOY_ARGS[@]}"
   portal_state whatif
   exit 0
 fi
@@ -554,7 +574,7 @@ fi
 echo "==> Deploying ($DEPLOY_NAME). A first deployment takes 30-45 minutes."
 echo "    If Cloud Shell disconnects, the deployment keeps running in Azure."
 portal_state started
-if ! arm deployment sub create -n "$DEPLOY_NAME" -l "$LOCATION" -p "$PARAM_FILE" \
+if ! arm deployment sub create -n "$DEPLOY_NAME" -l "$LOCATION" "${DEPLOY_ARGS[@]}" \
   --query properties.outputs -o jsonc; then
   restore_hosts
   portal_state failed
