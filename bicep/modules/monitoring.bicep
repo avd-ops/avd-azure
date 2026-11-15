@@ -23,10 +23,42 @@ module workspace 'br/public:avm/res/operational-insights/workspace:0.16.1' = {
   }
 }
 
+// Ensure built-in Perf and Event tables finish provisioning on a greenfield workspace
+// before creating the DCR, preventing InvalidOutputTable on first deployment.
+resource workspaceExisting 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
+  name: logAnalyticsName
+}
+
+resource perfTable 'Microsoft.OperationalInsights/workspaces/tables@2022-10-01' = {
+  parent: workspaceExisting
+  name: 'Perf'
+  properties: {
+    retentionInDays: retentionInDays
+  }
+  dependsOn: [
+    workspace
+  ]
+}
+
+resource eventTable 'Microsoft.OperationalInsights/workspaces/tables@2022-10-01' = {
+  parent: workspaceExisting
+  name: 'Event'
+  properties: {
+    retentionInDays: retentionInDays
+  }
+  dependsOn: [
+    workspace
+  ]
+}
+
 // AVD Insights only recognizes DCRs whose name starts with "microsoft-avdi-".
 // Counters and event logs follow the Microsoft-published AVD Insights set.
 module avdInsightsDcr 'br/public:avm/res/insights/data-collection-rule:0.11.0' = {
   name: 'dcr-avd-insights'
+  dependsOn: [
+    perfTable
+    eventTable
+  ]
   params: {
     name: 'microsoft-avdi-${baseName}'
     location: location
