@@ -134,6 +134,21 @@ param sessionHostImageId string = ''
 ])
 param sessionHostGeneration string = ''
 
+@description('Enable Accelerated Networking on session host NICs. Set to false for VM sizes that do not support it.')
+param enableAcceleratedNetworking bool = true
+
+@description('How Azure-distributed GPU drivers are installed on NV-series session hosts: auto deploys the VM extension on Standard_NV* SKUs; extension forces the extension; image assumes drivers are baked into the golden image; none skips driver and policy setup.')
+@allowed([
+  'auto'
+  'extension'
+  'image'
+  'none'
+])
+param gpuDriverMode string = 'auto'
+
+@description('Configure Terminal Services host policies for GPU rendering, H.264/AVC hardware encoding, and AVC 4:4:4 mode on GPU session hosts.')
+param enableGpuGraphicsPolicy bool = true
+
 @description('The host pool tags the rotation script owns (avdlz-image, avdlz-generation, avdlz-image-next, avdlz-image-previous, avdlz-rotation). deploy.sh passes the pool\'s current values so a deployment keeps them; nothing else sets them.')
 param hostPoolStateTags object = {}
 
@@ -734,6 +749,9 @@ module sessionHosts 'modules/sessionHosts.bicep' = {
     usersGroupObjectId: avdUsersGroupObjectId
     adminsGroupObjectId: avdAdminsGroupObjectId
     avdServicePrincipalObjectId: avdServicePrincipalObjectId
+    enableAcceleratedNetworking: bool(primaryPool.?enableAcceleratedNetworking ?? enableAcceleratedNetworking)
+    gpuDriverMode: primaryPool.?gpuDriverMode ?? gpuDriverMode
+    enableGpuGraphicsPolicy: bool(primaryPool.?enableGpuGraphicsPolicy ?? enableGpuGraphicsPolicy)
   }
 }
 
@@ -770,6 +788,9 @@ module additionalSessionHosts 'modules/sessionHosts.bicep' = [
       adminsGroupObjectId: avdAdminsGroupObjectId
       avdServicePrincipalObjectId: avdServicePrincipalObjectId
       deployRoleAssignments: false
+      enableAcceleratedNetworking: bool(pool.?enableAcceleratedNetworking ?? enableAcceleratedNetworking)
+      gpuDriverMode: pool.?gpuDriverMode ?? gpuDriverMode
+      enableGpuGraphicsPolicy: bool(pool.?enableGpuGraphicsPolicy ?? enableGpuGraphicsPolicy)
     }
   }
 ]
