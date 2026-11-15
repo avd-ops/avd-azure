@@ -75,6 +75,7 @@ NETWORKING_OUTPUTS="${AVD_NETWORKING_OUTPUTS_PATH:-}"
 CREATE_HUB_PEERING="${AVD_CREATE_HUB_PEERING:-}"
 CLOUD="${AVD_CLOUD:-commercial}"
 COMPLIANCE_PROFILE="${AVD_COMPLIANCE_PROFILE:-}"
+NAME_PREFIX_ARG="${AVD_NAME_PREFIX:-}"
 OUTPUT_MANIFEST="${AVD_AZURE_OUTPUTS_PATH:-}"
 AVD_APP_ID="9cdead84-a844-4324-93f2-b2e6bb768d07"   # Azure Virtual Desktop first-party app
 
@@ -110,6 +111,7 @@ while [[ $# -gt 0 ]]; do
     --topology) TOPOLOGY="$2"; shift 2 ;;
     --networking-outputs) NETWORKING_OUTPUTS="$2"; shift 2 ;;
     --create-hub-peering) CREATE_HUB_PEERING="$2"; shift 2 ;;
+    --name-prefix) NAME_PREFIX_ARG="$2"; shift 2 ;;
     --output-manifest) OUTPUT_MANIFEST="$2"; shift 2 ;;
     --azure-outputs) OUTPUT_MANIFEST="$2"; shift 2 ;;
     *) usage ;;
@@ -118,6 +120,12 @@ done
 
 [[ -z "$PARAM_FILE" || -z "$LOCATION" ]] && usage
 [[ ! -f "$PARAM_FILE" ]] && { echo "Parameter file not found: $PARAM_FILE"; exit 1; }
+if [[ -n "$NAME_PREFIX_ARG" ]]; then
+  NAME_PREFIX_ARG=${NAME_PREFIX_ARG//-/}
+  NAME_PREFIX_ARG=${NAME_PREFIX_ARG,,}
+  [[ "$NAME_PREFIX_ARG" =~ ^[a-z0-9]{2,8}$ ]] || { echo "--name-prefix / AVD_NAME_PREFIX takes 2 to 8 lowercase letters or digits: '$NAME_PREFIX_ARG'" >&2; exit 1; }
+  export AVD_NAME_PREFIX="$NAME_PREFIX_ARG"
+fi
 CLOUD="${CLOUD,,}"
 [[ "$CLOUD" == commercial || "$CLOUD" == usgov ]] || { echo "--cloud takes commercial or usgov: '$CLOUD'"; exit 1; }
 if [[ -z "$COMPLIANCE_PROFILE" ]]; then
@@ -390,8 +398,16 @@ portal_state() {
 # A redeploy updates each existing host's run commands, and Azure refuses that on a VM that isn't
 # running ("Cannot modify extensions in the VM when the VM is not running"). Power management keeps
 # hosts deallocated most of the time, so a redeploy starts them and deallocates them again after.
-param_value() { sed -n "s/^param $1 = '\([^']*\)'.*/\1/p" "$PARAM_FILE" | head -n 1; }
-NAME_PREFIX=$(param_value namePrefix); ENV_NAME=$(param_value environmentName)
+param_value() {
+  local line
+  line=$(sed -n "s/^param $1 = //p" "$PARAM_FILE" | head -n 1)
+  if [[ "$line" =~ ^\'([^\']*)\' ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ \?[[:space:]]*\'([^\']*)\' ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+}
+NAME_PREFIX="${NAME_PREFIX_ARG:-$(param_value namePrefix)}"; ENV_NAME=$(param_value environmentName)
 NAME_PREFIX=${NAME_PREFIX//-/}; NAME_PREFIX=${NAME_PREFIX,,}   # cleanPrefix in bicep/main.bicep
 HOSTS_RG="rg-$NAME_PREFIX-$ENV_NAME-hosts"
 STOPPED_HOSTS=()
