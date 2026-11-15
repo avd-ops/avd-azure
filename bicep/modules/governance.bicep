@@ -122,7 +122,10 @@ resource inheritTagAssignments 'Microsoft.Authorization/policyAssignments@2024-0
 
 resource inheritTagRoleAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
   for (tag, i) in governedTags: if (enablePolicyGuardrails) {
-    name: guid(subscription().id, 'avdlz-inherit-rg-tag', tag)
+    // Include location and baseName so a different region/prefix deployment gets a
+    // distinct role assignment GUID instead of colliding (RoleAssignmentUpdateNotPermitted)
+    // when Azure rotates the policy assignment's system-assigned principalId.
+    name: guid(subscription().id, 'avdlz-inherit-rg-tag', tag, location, baseName)
     properties: {
       principalId: inheritTagAssignments[i]!.identity.principalId
       principalType: 'ServicePrincipal'
