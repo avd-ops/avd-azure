@@ -618,6 +618,26 @@ module privateDns 'modules/privateDns.bicep' = if (deployAnyLocalDns) {
   }
 }
 
+var centralZoneIdsToLink = filter([
+  existingFileZoneId
+  existingKeyVaultZoneId
+  existingAvdZoneId
+  existingAvdGlobalZoneId
+], id => !empty(id))
+
+module centralDnsLinks 'modules/centralDnsLink.bicep' = [
+  for (zoneId, i) in centralZoneIdsToLink: if (connectivityMode == 'HubPeered' && createHubToSpokePeering) {
+    name: 'avdlz-central-dns-link-${i}'
+    scope: resourceGroup(split(zoneId, '/')[2], split(zoneId, '/')[4])
+    params: {
+      zoneName: split(zoneId, '/')[8]
+      linkName: 'link-${names.vnet}'
+      vnetResourceId: network.outputs.vnetResourceId
+      tags: allTags
+    }
+  }
+]
+
 var dnsZoneIds = {
   file: !empty(existingFileZoneId) ? existingFileZoneId : privateDns!.outputs.fileZoneResourceId
   keyVault: !empty(existingKeyVaultZoneId) ? existingKeyVaultZoneId : privateDns!.outputs.keyVaultZoneResourceId
