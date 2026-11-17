@@ -309,6 +309,34 @@ param jumpboxAutoShutdownTime string = '2000'
 @description('Keep the jumpbox running past its daily stop until this UTC time (yyyy-MM-ddTHH:mmZ), recorded on the avdlz-keep-running-until tag of the VM. Empty: the daily stop applies.')
 param jumpboxKeepRunningUntil string = ''
 
+// ---------- Azure Local session host placement (Decision 0023) ----------
+@description('Session host placement model: azure (Azure IaaS VMs) or azure-local (registered Azure Local 23H2+ instance).')
+@allowed([
+  'azure'
+  'azure-local'
+])
+param hostPlacement string = 'azure'
+
+@description('Resource ID of the target Custom Location when hostPlacement is azure-local.')
+param customLocationId string = ''
+
+@description('Resource ID of the target Arc logical network when hostPlacement is azure-local.')
+param azureLocalLogicalNetworkId string = ''
+
+@description('Resource ID of the target Azure Local gallery or marketplace image when hostPlacement is azure-local.')
+param azureLocalImageId string = ''
+
+@description('Bring-your-own on-premises SMB UNC path for FSLogix profiles when hostPlacement is azure-local.')
+param localSmbProfilePath string = ''
+
+@description('vCPU count per Azure Local session host VM instance.')
+@minValue(2)
+param azureLocalProcessors int = 4
+
+@description('Memory in MB per Azure Local session host VM instance.')
+@minValue(4096)
+param azureLocalMemoryMB int = 16384
+
 @description('The jumpbox VM already exists (deploy.sh sets it). Then only its daily stop and tags are updated: Azure refuses a change to the custom data and admin password of an existing VM.')
 param jumpboxExists bool = false
 
@@ -668,7 +696,7 @@ module keyVault 'modules/keyVault.bicep' = {
 // =====================================================================
 // 5. PROFILE STORAGE — Premium Azure Files, Entra Kerberos, private only
 // =====================================================================
-module storage 'modules/storage.bicep' = {
+module storage 'modules/storage.bicep' = if (hostPlacement == 'azure') {
   name: 'avdlz-storage'
   scope: rgStorage
   params: {
@@ -689,14 +717,14 @@ module storage 'modules/storage.bicep' = {
   }
 }
 
-module backup 'modules/backup.bicep' = if (enableProfileBackup) {
+module backup 'modules/backup.bicep' = if (hostPlacement == 'azure' && enableProfileBackup) {
   name: 'avdlz-backup'
   scope: rgStorage
   params: {
     location: location
     tags: allTags
     vaultName: names.recoveryVault
-    storageAccountResourceId: storage.outputs.resourceId
+    storageAccountResourceId: storage!.outputs.resourceId
     shareName: profileShareName
     retentionDays: profileBackupRetentionDays
     profileBackupTier: profileBackupTier
@@ -777,7 +805,7 @@ module controlPlane 'modules/controlPlane.bicep' = {
 // 7. SESSION HOSTS — Entra joined, Intune enrolled, Trusted Launch,
 //    registered to the host pool and FSLogix-configured declaratively
 // =====================================================================
-module sessionHosts 'modules/sessionHosts.bicep' = {
+module sessionHosts 'modules/sessionHosts.bicep' = if (hostPlacement == 'azure') {
   name: 'avdlz-session-hosts'
   scope: rgHosts
   params: {
@@ -798,7 +826,7 @@ module sessionHosts 'modules/sessionHosts.bicep' = {
     hostPoolRegistrationToken: controlPlane.outputs.registrationToken
     hostPoolResourceId: controlPlane.outputs.hostPoolResourceId
     dataCollectionRuleResourceId: monitoring.outputs.avdInsightsDataCollectionRuleResourceId
-    profileShareUncPath: storage.outputs.profileShareUncPath
+    profileShareUncPath: storage!.outputs.profileShareUncPath
     fslogixProfileSizeMiB: int(primaryPool.?fslogixProfileSizeMiB ?? fslogixProfileSizeMiB)
     usersGroupObjectId: avdUsersGroupObjectId
     adminsGroupObjectId: avdAdminsGroupObjectId
@@ -809,8 +837,31 @@ module sessionHosts 'modules/sessionHosts.bicep' = {
   }
 }
 
+module azureLocalSessionHosts 'modules/azureLocalSessionHosts.bicep' = if (hostPlacement == 'azure-local') {
+  name: 'avdlz-azure-local-session-hosts'
+  scope: rgHosts
+  params: {
+    location: location
+    tags: allTags
+    count: int(primaryPool.?sessionHostCount ?? sessionHostCount)
+    namePrefix: hostNamePrefix
+    customLocationId: customLocationId
+    logicalNetworkId: azureLocalLogicalNetworkId
+    imageId: azureLocalImageId
+    processors: azureLocalProcessors
+    memoryMB: azureLocalMemoryMB
+    enrollInIntune: bool(primaryPool.?enrollInIntune ?? enrollInIntune)
+    localAdminUsername: localAdminUsername
+    localAdminPassword: localAdminPassword
+    hostPoolRegistrationToken: controlPlane.outputs.registrationToken
+    localSmbProfilePath: localSmbProfilePath
+    fslogixProfileSizeMiB: int(primaryPool.?fslogixProfileSizeMiB ?? fslogixProfileSizeMiB)
+    hostPoolResourceId: controlPlane.outputs.hostPoolResourceId
+  }
+}
+
 module additionalSessionHosts 'modules/sessionHosts.bicep' = [
-  for (pool, i) in extraHostPools: {
+  for (pool, i) in extraHostPools: if (hostPlacement == 'azure') {
     name: take('avdlz-session-hosts-${i + 2}', 64)
     scope: rgHosts
     dependsOn: [
@@ -838,7 +889,7 @@ module additionalSessionHosts 'modules/sessionHosts.bicep' = [
       hostPoolRegistrationToken: additionalControlPlanePools[i].outputs.registrationToken
       hostPoolResourceId: additionalControlPlanePools[i].outputs.hostPoolResourceId
       dataCollectionRuleResourceId: monitoring.outputs.avdInsightsDataCollectionRuleResourceId
-      profileShareUncPath: storage.outputs.profileShareUncPath
+      profileShareUncPath: hostPlacement == 'azure' ? storage!.outputs.profileShareUncPath : localSmbProfilePath
       fslogixProfileSizeMiB: int(pool.?fslogixProfileSizeMiB ?? fslogixProfileSizeMiB)
       usersGroupObjectId: avdUsersGroupObjectId
       adminsGroupObjectId: avdAdminsGroupObjectId
@@ -952,9 +1003,18 @@ output resourceGroups object = {
 }
 output hostPoolResourceId string = controlPlane.outputs.hostPoolResourceId
 output workspaceResourceId string = controlPlane.outputs.workspaceResourceId
-output storageAccountName string = storage.outputs.name
-output storageAccountResourceId string = storage.outputs.resourceId
+output storageAccountName string = hostPlacement == 'azure' ? storage!.outputs.name : ''
+output storageAccountResourceId string = hostPlacement == 'azure' ? storage!.outputs.resourceId : ''
 output keyVaultName string = keyVault.outputs.name
 output logAnalyticsWorkspaceResourceId string = monitoring.outputs.logAnalyticsWorkspaceResourceId
-output sessionHostNames string[] = sessionHosts.outputs.names
+output sessionHostNames string[] = hostPlacement == 'azure' ? sessionHosts!.outputs.names : azureLocalSessionHosts!.outputs.names
 output jumpboxName string = deployJumpbox ? names.jumpbox : ''
+output azureLocal object = hostPlacement == 'azure-local'
+  ? {
+      hostPlacement: hostPlacement
+      customLocationId: customLocationId
+      logicalNetworkId: azureLocalLogicalNetworkId
+      vmInstanceIds: azureLocalSessionHosts!.outputs.vmInstanceIds
+      hybridComputeMachineIds: azureLocalSessionHosts!.outputs.hybridComputeMachineIds
+    }
+  : {}
