@@ -137,6 +137,32 @@ resource vmInstance 'Microsoft.AzureStackHCI/virtualMachineInstances@2024-01-01'
   }
 ]
 
+var fslogixCmd = !empty(localSmbProfilePath)
+  ? 'New-Item -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Force | Out-Null; Set-ItemProperty -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Name Enabled -Value 1 -Type DWord; Set-ItemProperty -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Name VHDLocations -Value \'${localSmbProfilePath}\' -Type MultiString; Set-ItemProperty -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Name SizeInMBs -Value ${fslogixProfileSizeMiB} -Type DWord;'
+  : ''
+
+var imdsWaitCmd = '$svc = Get-Service -Name himds -ErrorAction SilentlyContinue; if ($svc -and $svc.Status -ne \'Running\') { Start-Service -Name himds -ErrorAction SilentlyContinue }; $imdsOk = $false; for ($n = 0; $n -lt 36; $n++) { try { $r = Invoke-WebRequest -Uri \'http://localhost:40342/metadata/identity/info?api-version=2018-02-01\' -Headers @{ Metadata = \'true\' } -UseBasicParsing -TimeoutSec 5; if ($r.StatusCode -eq 200) { $imdsOk = $true; break } } catch {}; Start-Sleep -Seconds 5 }; if (-not $imdsOk) { throw \'Arc IMDS (http://localhost:40342) did not become reachable within 180s; verify himds service and Connected Machine agent.\' };'
+
+resource avdConfigExtension 'Microsoft.HybridCompute/machines/extensions@2024-07-10' = [
+  for i in hostIndices: {
+    parent: hybridMachine[i]
+    name: 'ConfigureAvdAndFSLogix'
+    location: location
+    tags: hostTags
+    dependsOn: [
+      vmInstance[i]
+    ]
+    properties: {
+      publisher: 'Microsoft.Compute'
+      type: 'CustomScriptExtension'
+      autoUpgradeMinorVersion: true
+      protectedSettings: {
+        commandToExecute: 'powershell -ExecutionPolicy Bypass -Command "${fslogixCmd} New-Item -Path \'HKLM:\\SOFTWARE\\Microsoft\\RDInfraAgent\' -Force | Out-Null; Set-ItemProperty -Path \'HKLM:\\SOFTWARE\\Microsoft\\RDInfraAgent\' -Name RegistrationToken -Value \'${hostPoolRegistrationToken}\' -Type String; ${imdsWaitCmd}"'
+      }
+    }
+  }
+]
+
 resource aadLoginExtension 'Microsoft.HybridCompute/machines/extensions@2024-07-10' = [
   for i in hostIndices: {
     parent: hybridMachine[i]
@@ -144,7 +170,7 @@ resource aadLoginExtension 'Microsoft.HybridCompute/machines/extensions@2024-07-
     location: location
     tags: hostTags
     dependsOn: [
-      vmInstance[i]
+      avdConfigExtension[i]
     ]
     properties: {
       publisher: 'Microsoft.Azure.ActiveDirectory'
@@ -155,30 +181,6 @@ resource aadLoginExtension 'Microsoft.HybridCompute/machines/extensions@2024-07-
             mdmId: '0000000a-0000-0000-c000-000000000000'
           }
         : {}
-    }
-  }
-]
-
-var fslogixCmd = !empty(localSmbProfilePath)
-  ? 'New-Item -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Force | Out-Null; Set-ItemProperty -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Name Enabled -Value 1 -Type DWord; Set-ItemProperty -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Name VHDLocations -Value \'${localSmbProfilePath}\' -Type MultiString; Set-ItemProperty -Path HKLM:\\SOFTWARE\\FSLogix\\Profiles -Name SizeInMBs -Value ${fslogixProfileSizeMiB} -Type DWord;'
-  : ''
-
-resource avdConfigExtension 'Microsoft.HybridCompute/machines/extensions@2024-07-10' = [
-  for i in hostIndices: {
-    parent: hybridMachine[i]
-    name: 'ConfigureAvdAndFSLogix'
-    location: location
-    tags: hostTags
-    dependsOn: [
-      aadLoginExtension[i]
-    ]
-    properties: {
-      publisher: 'Microsoft.Compute'
-      type: 'CustomScriptExtension'
-      autoUpgradeMinorVersion: true
-      protectedSettings: {
-        commandToExecute: 'powershell -ExecutionPolicy Bypass -Command "${fslogixCmd} New-Item -Path \'HKLM:\\SOFTWARE\\Microsoft\\RDInfraAgent\' -Force | Out-Null; Set-ItemProperty -Path \'HKLM:\\SOFTWARE\\Microsoft\\RDInfraAgent\' -Name RegistrationToken -Value \'${hostPoolRegistrationToken}\' -Type String"'
-      }
     }
   }
 ]

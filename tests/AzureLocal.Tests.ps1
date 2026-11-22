@@ -26,6 +26,11 @@ Describe 'Azure Local session host placement (Decision 0023)' {
         $script:moduleText | Should -Not -Match 'JsonADDomainExtension'
     }
 
+    It 'waits for Arc IMDS (localhost:40342) in ConfigureAvdAndFSLogix before AADLoginForWindows' {
+        $script:moduleText | Should -Match 'localhost:40342'
+        $script:moduleText | Should -Match 'dependsOn:\s*\[\s*avdConfigExtension\[i\]'
+    }
+
     It 'wires hostPlacement and optional azureLocal output in main.bicep' {
         $script:mainText | Should -Match "param hostPlacement string = 'azure'"
         $script:mainText | Should -Match "module storage 'modules/storage\.bicep' = if \(hostPlacement == 'azure'\)"
